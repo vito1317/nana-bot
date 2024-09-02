@@ -51,7 +51,6 @@ async def on_ready():
     conn = sqlite3.connect('analytics.db')
     cursor = conn.cursor()
 
-    # 新增messages表格
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS messages (
             message_id INTEGER PRIMARY KEY,
@@ -62,7 +61,6 @@ async def on_ready():
         )
         ''')
 
-    # 新增daily_activity表格
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS daily_activity (
             date TEXT,
@@ -154,7 +152,6 @@ async def on_message(message):
     conn = sqlite3.connect('analytics.db')
     cursor = conn.cursor()
 
-    # 插入新訊息到messages表格
     cursor.execute('''
         INSERT INTO messages (user_id, channel_id, timestamp, content) 
         VALUES (?, ?, ?, ?)
