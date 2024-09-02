@@ -168,7 +168,6 @@ async def on_message(message):
     conn = sqlite3.connect('analytics.db')
     cursor = conn.cursor()
 
-    # 插入新訊息到messages表格
     cursor.execute('''
         INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) 
         VALUES (?, ?, ?, ?, ?)
@@ -194,12 +193,13 @@ async def on_message(message):
             message) and not message.author.bot:
         try:
             timestamp = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
-            c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 30)")
-            conn.commit()
+            with sqlite3.connect('messages_chat_3.db') as conn:
+              c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 30)")
+              conn.commit()
             logging.info("Received message: %s", message.content)
-
-            c.execute("SELECT user, content, timestamp FROM message ORDER BY id DESC LIMIT 30")
-            rows = c.fetchall()
+            with sqlite3.connect('messages_chat_3.db') as conn:
+              c.execute("SELECT user, content, timestamp FROM message ORDER BY id DESC LIMIT 30")
+              rows = c.fetchall()
 
             chat_history = [{
                 "role": "user",
@@ -241,16 +241,17 @@ async def on_message(message):
                                              HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
                                              HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                                          })
-            c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
-                      (user_name, message.content, timestamp))
-            conn.commit()
+            with sqlite3.connect('messages_chat_3.db') as conn:
+              c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
+                        (user_name, message.content, timestamp))
+              conn.commit()
 
             reply = response.text
 
             logging.info("API response: %s", reply)
-
-            c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", ("Gemini", reply, timestamp))
-            conn.commit()
+            with sqlite3.connect('messages_chat_3.db') as conn:
+                c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", ("Gemini", reply, timestamp))
+                conn.commit()
 
             if len(reply) > 2000:
                 reply = reply[:1997] + "..."
