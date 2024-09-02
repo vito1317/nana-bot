@@ -78,9 +78,10 @@ async def on_ready():
 @tasks.loop(hours=24)
 async def send_daily_message():
     channel_id = #新人審核channel id
+    not_reviewed_id = #未審核身分組id
     channel = bot.get_channel(channel_id)
     if channel:
-        await channel.send('<@&未審核用戶身分組id> 各位未審核的人，快來這邊審核喔')
+        await channel.send(f'<@&{not_reviewed_id}> 各位未審核的人，快來這邊審核喔')
 
 @send_daily_message.before_loop
 async def before_send_daily_message():
@@ -94,7 +95,7 @@ async def on_member_join(member):
     logging.info(member)
     channel_id = #歡迎加入channel id
     channel = bot.get_channel(channel_id)
-    role_id = #歡迎加入channel id
+    role_id = #未審核身分組 id
     role = member.guild.get_role(role_id)
     conn_user_join = sqlite3.connect('analytics.db')
     c_user_join = conn_user_join.cursor()
