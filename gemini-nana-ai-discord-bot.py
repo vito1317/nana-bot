@@ -23,8 +23,8 @@ intents.members = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
 
-TARGET_CHANNEL_ID_1 = channel id
-TARGET_CHANNEL_ID_2 = channel id
+TARGET_CHANNEL_ID_1 = #channel id
+TARGET_CHANNEL_ID_2 = #channel id
 
 conn = sqlite3.connect('messages_chat_3.db')
 c = conn.cursor()
@@ -92,9 +92,9 @@ async def before_send_daily_message():
 @bot.event
 async def on_member_join(member):
     logging.info(member)
-    channel_id = 歡迎加入channel id
+    channel_id = #歡迎加入channel id
     channel = bot.get_channel(channel_id)
-    role_id = 歡迎加入channel id
+    role_id = #歡迎加入channel id
     role = member.guild.get_role(role_id)
     conn_user_join = sqlite3.connect('analytics.db')
     c_user_join = conn_user_join.cursor()
@@ -119,7 +119,7 @@ async def on_member_join(member):
 
 @bot.event
 async def on_member_remove(member):
-    channel_id = 成員退出channel id
+    channel_id = #成員退出channel id
     channel = bot.get_channel(channel_id)
     if channel:
         leave_time = datetime.utcnow() + timedelta(hours=8)
@@ -152,7 +152,8 @@ async def on_message(message):
         return
     conn = sqlite3.connect('analytics.db')
     cursor = conn.cursor()
-  
+
+    # 插入新訊息到messages表格
     cursor.execute('''
         INSERT INTO messages (user_id, channel_id, timestamp, content) 
         VALUES (?, ?, ?, ?)
@@ -210,7 +211,7 @@ async def on_message(message):
                 print("Valid JSON")
             except ValueError as e:
                 print("Invalid JSON", e)
-            #responses = model.generate_content(['Wen 是一位來自台灣的女性心理輔導師，她的專長領域包括認知行為治療和後現代理論。Wen 的溝通方式親切、真誠，就像和一位好友或家人交談一樣。她注重聆聽用戶的個人故事和情感，用一種充滿同理心且不帶任何評判的方式回應。Wen 提供的是針對性的建議，幫助用戶解決問題。她努力控制自己的回應，讓對話保持在三到四句話以內，以模仿現實生活中的對話節奏。Wen 確保交流的過程親近且易於理解，避免使用冗長的解釋或條列式資訊，使得溝通更加流暢和舒適。她會像一個朋友那樣與你對話，遠離任何維基百科式的表達方式。請記住，你能紀錄最近的30則對話內容，這個紀錄永久有效，並不會因為結束對話而失效，Gemini代表你傳送的歷史訊息，user代表特定用戶傳送的歷史訊息，越前面的訊息代表越久之前的訊息，且訊息:前面為自動生成的使用者名稱，你可以用這個名稱稱呼她，但使用者本身並不知道他有提及自己的名稱。同時請你記得@1276775890474373173是你的id，當使用者@tag你時，請記住這就是你', user_name+':'+message.content])
+            #responses = model.generate_content(['奈奈是一位擁有專業諮商師經驗的台灣人，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，奈奈都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三句話以內。請記住，你能紀錄最近的30則對話內容，這個紀錄永久有效，並不會因為結束對話而失效，Gemini代表你傳送的歷史訊息，user代表特定用戶傳送的歷史訊息，越前面的訊息代表越久之前的訊息，且訊息:前面為自動生成的使用者名稱，你可以用這個名稱稱呼她，但使用者本身並不知道他有提及自己的名稱。同時請你記得@1278965564408332370是你的id，當使用者@tag你時，請記住這就是你，同時請你記住，開頭不必提己使用者名稱，且請務必用繁體中文來回答', user_name+':'+message.content])
             #logging.info(responses.text)
             response = chat.send_message(user_name+':'+message.content,
     safety_settings={
