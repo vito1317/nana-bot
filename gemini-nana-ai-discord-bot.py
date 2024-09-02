@@ -77,7 +77,7 @@ async def on_ready():
 
 @tasks.loop(hours=24)
 async def send_daily_message():
-    channel_id = 1212120624122826812
+    channel_id = #新人審核channel id
     channel = bot.get_channel(channel_id)
     if channel:
         await channel.send('<@&未審核用戶身分組id> 各位未審核的人，快來這邊審核喔')
