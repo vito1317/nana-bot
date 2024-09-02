@@ -71,7 +71,6 @@ async def on_ready():
         )
         ''')
 
-    # 關閉資料庫連接
     conn.commit()
     conn.close()
 
@@ -153,8 +152,7 @@ async def on_message(message):
         return
     conn = sqlite3.connect('analytics.db')
     cursor = conn.cursor()
-
-    # 插入新訊息到messages表格
+  
     cursor.execute('''
         INSERT INTO messages (user_id, channel_id, timestamp, content) 
         VALUES (?, ?, ?, ?)
