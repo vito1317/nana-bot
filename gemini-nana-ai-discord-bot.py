@@ -93,9 +93,9 @@ async def before_send_daily_message():
 @bot.event
 async def on_member_join(member):
     logging.info(member)
-    channel_id = 1278191850246635560
+    channel_id = 歡迎加入channel id
     channel = bot.get_channel(channel_id)
-    role_id = 1275643437823168624
+    role_id = 歡迎加入channel id
     role = member.guild.get_role(role_id)
     conn_user_join = sqlite3.connect('analytics.db')
     c_user_join = conn_user_join.cursor()
@@ -108,19 +108,19 @@ async def on_member_join(member):
     if channel:
         responses = model.generate_content(['奈奈是一位擁有專業諮商師經驗的台灣人，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，奈奈都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三句話以內。請記住，你能紀錄最近的30則對話內容，這個紀錄永久有效，並不會因為結束對話而失效，Gemini代表你傳送的歷史訊息，user代表特定用戶傳送的歷史訊息，越前面的訊息代表越久之前的訊息，且訊息:前面為自動生成的使用者名稱，你可以用這個名稱稱呼她，但使用者本身並不知道他有提及自己的名稱。當使用者@tag你時，請記住這就是你，同時請你記住，開頭不必提己使用者名稱，且請務必用繁體中文來回答，請不要回覆這則訊息', f'你現在要做的事是歡迎使用者{member.mention}的加入並且引導使用者使用系統，同時也可以請你自己做一下自我介紹(以你奈奈的身分做自我介紹而不是請使用者做自我介紹)，同時，請不要詢問使用者想要聊聊嗎、想要聊什麼之類的話。同時也請不要回覆這則訊息。', '第二步是tag <#新人審核channel id> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，"請務必引導使用者講述自己的病症與情況"，而不是只傳送 <#新人審核channel id>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也請不要請新人(使用者)與您分享相關訊息'])
         logging.info(responses.text)
-        if(f"{member.mention}" in responses.text and f'<#1212120624122826812>' in responses.text):
+        if(f"{member.mention}" in responses.text and f'<#新人審核channel id>' in responses.text):
             await channel.send(responses.text)
             logging.info(responses.text)
-        elif(f'<#1212120624122826812>' in responses.text):
+        elif(f'<#新人審核channel id>' in responses.text):
             await channel.send(f'{member.mention}'+responses.text)
             logging.info(f'{member.mention}'+responses.text)
         elif(f'{member.mention}' in responses.text):
-            await channel.send(responses.text + '<#1212120624122826812> 請先進行審核流程，以便讓我更了解你喔')
-            logging.info(responses.text + '<#1212120624122826812> 請先進行審核流程，以便讓我更了解你喔')
+            await channel.send(responses.text + '<#新人審核channel id> 請先進行審核流程，以便讓我更了解你喔')
+            logging.info(responses.text + '<#新人審核channel id> 請先進行審核流程，以便讓我更了解你喔')
 
 @bot.event
 async def on_member_remove(member):
-    channel_id = 1279310684668297278
+    channel_id = 成員退出channel id
     channel = bot.get_channel(channel_id)
     if channel:
         leave_time = datetime.utcnow() + timedelta(hours=8)
