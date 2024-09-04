@@ -189,8 +189,8 @@ async def on_message(message):
     conn_message.commit()
     conn_message.close()
     await bot.process_commands(message)
-    if message.channel.id == TARGET_CHANNEL_ID_1 or message.channel.id == TARGET_CHANNEL_ID_2 or bot.user.mentioned_in(
-            message) and not message.author.bot:
+    if message.channel.id == TARGET_CHANNEL_ID_1 or message.channel.id == TARGET_CHANNEL_ID_2 or (bot.user.mentioned_in(
+            message) and not message.author.bot):
         try:
             timestamp = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
             with sqlite3.connect('messages_chat_3.db') as conn:
