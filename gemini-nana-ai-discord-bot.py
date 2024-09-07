@@ -76,7 +76,8 @@ async def on_ready():
     # 關閉資料庫連接
     conn.commit()
     conn.close()
-
+    activity = discord.Game(name="bot status")
+    await bot.change_presence(status=discord.Status.online, activity=activity)
 
 @tasks.loop(hours=24)
 async def send_daily_message():
