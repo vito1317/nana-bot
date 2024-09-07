@@ -111,21 +111,59 @@ async def on_member_join(member):
     if role:
         await member.add_roles(role)
     if channel:
-        reviewed_channel_id = #reviewed_channel_id
+        reviewed_channel_id = 1212120624122826812
         responses = model.generate_content([
                                                '奈奈是一位擁有專業諮商師經驗的台灣人，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，奈奈都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三句話以內。請記住，你能紀錄最近的30則對話內容，這個紀錄永久有效，並不會因為結束對話而失效，Gemini代表你傳送的歷史訊息，user代表特定用戶傳送的歷史訊息，越前面的訊息代表越久之前的訊息，且訊息:前面為自動生成的使用者名稱，你可以用這個名稱稱呼她，但使用者本身並不知道他有提及自己的名稱。當使用者@tag你時，請記住這就是你，同時請你記住，開頭不必提己使用者名稱，且請務必用繁體中文來回答，請不要回覆這則訊息',
                                                f'你現在要做的事是歡迎使用者{member.mention}的加入並且引導使用者使用系統，同時也可以請你自己做一下自我介紹(以你奈奈的身分做自我介紹而不是請使用者做自我介紹)，同時，請不要詢問使用者想要聊聊嗎、想要聊什麼之類的話。同時也請不要回覆這則訊息。',
-                                               f'第二步是tag <#{reviewed_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，"請務必引導使用者講述自己的病症與情況"，而不是只傳送 <#{reviewed_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也請不要請新人(使用者)與您分享相關訊息'])
+                                               f'第二步是tag <#{reviewed_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，請務必引導使用者講述自己的病症與情況，而不是只傳送 <#{reviewed_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也並不是請你去示範，也不是請他跟你分享要聊什麼，也請不要請新人(使用者)與您分享相關訊息'])
+        logging.info(f'<#{reviewed_channel_id}>')
         logging.info(responses.text)
         if (f"{member.mention}" in responses.text and f'<#1212120624122826812>' in responses.text):
-            await channel.send(responses.text)
+            embed = discord.Embed(title="analytics",
+                                  description=responses.text)
+            await channel.send(embed=embed)
             logging.info(responses.text)
-        elif (f'<#{reviewed_channel_id}>' in responses.text):
-            await channel.send(f'{member.mention}' + responses.text)
+        elif (f'<#{reviewed_channel_id}>' not in responses.text and f'{member.mention}' not in responses.text):
+            response = responses.text
+            text = response.replace("<#>", "<#1212120624122826812>")
+            text = text.replace("<@#1212120624122826812>", "<#1212120624122826812>")
+            text = text.replace("<#@1212120624122826812>", "<#1212120624122826812>")
+            logging.info(f'replace : {text}')
+            if text != response:
+                embed = discord.Embed(title="analytics",
+                                      description=f'{member.mention}' + text)
+                await channel.send(embed=embed)
+                logging.info(
+                    f'{member.mention}' + text)
+            else:
+                embed = discord.Embed(title="analytics",
+                                      description=f'{member.mention}' + text + '<#1212120624122826812>這裡是新人審核頻道，方便我更了解你的狀況。你可以跟我聊聊目前讓你感到困擾的事情，例如：你最近遇到了哪些困難、情緒上有哪些起伏、或是想尋求什麼樣的幫助。不用擔心，我會用溫暖和理解的方式傾聽你的分享。😊')
+                await channel.send(embed=embed)
+                logging.info(
+                    f'{member.mention}' + text + '<#1212120624122826812>這裡是新人審核頻道，方便我更了解你的狀況。你可以跟我聊聊目前讓你感到困擾的事情，例如：你最近遇到了哪些困難、情緒上有哪些起伏、或是想尋求什麼樣的幫助。不用擔心，我會用溫暖和理解的方式傾聽你的分享。😊')
+        elif (f'<#{reviewed_channel_id}>' not in responses.text):
+            response = responses.text
+            text = response.replace("<#>", "<#1212120624122826812>")
+            text = text.replace("<@#1212120624122826812>", "<#1212120624122826812>")
+            text = text.replace("<#@1212120624122826812>", "<#1212120624122826812>")
+            logging.info(f'replace : {text}')
+            if text != response:
+                embed = discord.Embed(title="analytics",
+                                      description=text)
+                await channel.send(embed=embed)
+                logging.info(
+                    text)
+            else:
+                embed = discord.Embed(title="analytics",
+                                      description=text + '<#1212120624122826812>這裡是新人審核頻道，方便我更了解你的狀況。你可以跟我聊聊目前讓你感到困擾的事情，例如：你最近遇到了哪些困難、情緒上有哪些起伏、或是想尋求什麼樣的幫助。不用擔心，我會用溫暖和理解的方式傾聽你的分享。😊')
+                await channel.send(embed=embed)
+                logging.info(
+                    text + '<#1212120624122826812>這裡是新人審核頻道，方便我更了解你的狀況。你可以跟我聊聊目前讓你感到困擾的事情，例如：你最近遇到了哪些困難、情緒上有哪些起伏、或是想尋求什麼樣的幫助。不用擔心，我會用溫暖和理解的方式傾聽你的分享。😊')
+        elif (f'{member.mention}' not in responses.text):
+            embed = discord.Embed(title="analytics",
+                                  description=f'{member.mention}' + responses.text)
+            await channel.send(embed=embed)
             logging.info(f'{member.mention}' + responses.text)
-        elif (f'{member.mention}' in responses.text):
-            await channel.send(responses.text + '<#1212120624122826812> 請先進行審核流程，以便讓我更了解你喔')
-            logging.info(responses.text + '<#1212120624122826812> 請先進行審核流程，以便讓我更了解你喔')
 
 
 @bot.event
@@ -189,8 +227,8 @@ async def on_message(message):
     conn_message.commit()
     conn_message.close()
     await bot.process_commands(message)
-    if message.channel.id == TARGET_CHANNEL_ID_1 or message.channel.id == TARGET_CHANNEL_ID_2 or (bot.user.mentioned_in(
-            message) and not message.author.bot):
+    if message.channel.id == TARGET_CHANNEL_ID_1 or message.channel.id == TARGET_CHANNEL_ID_2 or bot.user.mentioned_in(
+            message) and not message.author.bot:
         try:
             timestamp = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
             with sqlite3.connect('messages_chat_3.db') as conn:
@@ -320,6 +358,7 @@ async def analytics(interaction: discord.Interaction, member: discord.Member = N
                 ''')
                 return cursor.fetchall()
 
+
         def get_daily_message_ranking():
             with get_database_connection() as conn:
                 cursor = conn.cursor()
@@ -331,6 +370,7 @@ async def analytics(interaction: discord.Interaction, member: discord.Member = N
                 ORDER BY message_count DESC
                 ''')
                 return cursor.fetchall()
+
 
         def insert_daily_activity():
             with get_database_connection() as conn:
@@ -344,6 +384,45 @@ async def analytics(interaction: discord.Interaction, member: discord.Member = N
                     ''', (today, channel_id, message_count))
                 conn.commit()
 
+        def get_weekly_active_users():
+            with get_database_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                SELECT COUNT(DISTINCT user_id) 
+                FROM users 
+                WHERE DATE(join_date) >= DATE('now', '-7 days')
+                ''')
+                return cursor.fetchone()[0]
+
+        def get_weekly_channel_message_count():
+            with get_database_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                SELECT channel_id, COUNT(*) 
+                FROM messages 
+                WHERE DATE(timestamp) >= DATE('now', '-7 days') 
+                GROUP BY channel_id 
+                ORDER BY COUNT(*) DESC
+                ''')
+                return cursor.fetchall()
+
+        def get_weekly_message_ranking():
+            with get_database_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                SELECT user_id, user_name, COUNT(*) as message_count 
+                FROM messages 
+                WHERE DATE(timestamp) >= DATE('now', '-7 days') 
+                GROUP BY user_id ,user_name
+                ORDER BY message_count DESC
+                ''')
+                return cursor.fetchall()
+
+        weekly_active_users = get_weekly_active_users()
+        weekly_channel_message_counts = get_weekly_channel_message_count()
+        weekly_message_ranking = get_weekly_message_ranking()
+
+
         active_users = get_daily_active_users()
         channel_message_counts = get_daily_channel_message_count()
         message_ranking = get_daily_message_ranking()
@@ -355,23 +434,30 @@ async def analytics(interaction: discord.Interaction, member: discord.Member = N
         message_content += "每日說話次數排名:\n"
         for user_id, user_name, message_count in message_ranking:
             message_content += f"用戶 <@{user_id}> {user_name}: {message_count} 次\n"
+
+        message_content += f"\n本週新增人口數: {weekly_active_users}\n"
+        message_content += "每週頻道說話次數:\n"
+        for channel_id, message_count in weekly_channel_message_counts:
+            message_content += f"頻道 <#{channel_id}>: {message_count} 次\n"
+        message_content += "每週說話次數排名:\n"
+        for user_id, user_name, message_count in weekly_message_ranking:
+            message_content += f"用戶 <@{user_id}> {user_name}: {message_count} 次\n"
+
         embed = discord.Embed(title="analytics",
                               description=message_content)
         await interaction.response.send_message(embed=embed)
         conn.close()
-
-        # 插入每日活動數據
         insert_daily_activity()
 
 
     else:
-        logging.info(f'分析請求: {member.name} ' + (str(member.id)))
+        logging.info(f'分析請求: {member.name} '+ (str(member.id)))
 
         conn_command = sqlite3.connect('analytics.db')
         c_command = conn_command.cursor()
         c_command.execute('''CREATE TABLE IF NOT EXISTS users
                         (user_id INTEGER PRIMARY KEY, message_count INTEGER, join_date TEXT)''')
-        c_command.execute('SELECT message_count, join_date FROM users WHERE user_id = ?', (str(member.id),))
+        c_command.execute('SELECT message_count, join_date FROM users WHERE user_id = ?',  (str(member.id),))
         result = c_command.fetchone()
         conn_command.close()
         logging.info(result)
