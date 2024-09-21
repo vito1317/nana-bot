@@ -26,8 +26,8 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 TARGET_CHANNEL_ID = [TARGET_CHANNEL_ID_LIST]
 token = "your discord bot token"
 WHITELISTED_SERVERS = {
-    server1_id: 'Server 1',
-    server2_id: 'Server 2'
+    server_1_id: 'Server 1',
+    server_2_id: 'Server 2'
 }
 def init_db(db_name):
     conn = sqlite3.connect(db_name)
