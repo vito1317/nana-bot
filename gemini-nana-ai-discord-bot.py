@@ -11,7 +11,7 @@ import json
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import time
-API_KEY = "AIzaSyBUIsXEnJ4BTWnIbYHJ4BJpPjnK3hcj0g0"
+API_KEY = "gemini api key"
 genai.configure(api_key = API_KEY)
 
 model = genai.GenerativeModel('gemini-1.5-flash')
