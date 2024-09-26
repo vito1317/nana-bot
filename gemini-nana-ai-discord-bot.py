@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS users (
     conn_message.commit()
     conn_message.close()
     await bot.process_commands(message)
-    if message.channel.id in TARGET_CHANNEL_ID or (bot.user.mentioned_in(message) and not message.author.bot):
+    if ('奈奈' in message.content) or (message.channel.id in TARGET_CHANNEL_ID) or (bot.user.mentioned_in(message) and not message.author.bot):
         try:
             async with message.channel.typing():
                 timestamp = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
