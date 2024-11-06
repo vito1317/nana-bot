@@ -22,6 +22,7 @@ WHITELISTED_SERVERS = {
     Your Server ID: 'Server 1',
 }
 TARGET_CHANNEL_ID = [TARGET_CHANNEL_ID]
+discord_bot_token = "Your Discord Bot Token"
 engines = [
     app_commands.Choice(name='Google', value='google'),
     app_commands.Choice(name='yahoo', value='yahoo')
