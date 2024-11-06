@@ -18,7 +18,7 @@ import time
 from search_engine_tool_vito1317 import google, bing, yahoo
 import re
 import commands
-from config import bot, GUILD_ID, WHITELISTED_SERVERS, TARGET_CHANNEL_ID, API_KEY, init_db, gemini_model, servers, send_daily_channel_id_list, not_reviewed_id, newcomer_channel_id, welcome_channel_id, member_remove_channel_id, discord_bot_token
+from config import bot, WHITELISTED_SERVERS, TARGET_CHANNEL_ID, API_KEY, init_db, gemini_model, servers, send_daily_channel_id_list, not_reviewed_id, newcomer_channel_id, welcome_channel_id, member_remove_channel_id, discord_bot_token
 import os 
 from dotenv import load_dotenv 
 load_dotenv()
