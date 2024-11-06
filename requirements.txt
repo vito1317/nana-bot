@@ -1,0 +1,10 @@
+discord
+discord.ext
+discord_interactions
+typing
+sqlite3
+logging
+google.generativeai
+requests
+BeautifulSoup4
+search_engine_tool_vito1317
