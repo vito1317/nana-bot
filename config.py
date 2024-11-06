@@ -11,15 +11,15 @@ intents.members = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 API_KEY = "Your Gemini API Key"
 gemini_model = "gemini-1.5-pro-002"
-servers = [servers_id]
-send_daily_channel_id_list = [send_daily_channel_id]
-newcomer_channel_id = [newcomer_channel_id]
-member_remove_channel_id = [member_remove_channel_id]
-not_reviewed_id = [not_reviewed_id]
-welcome_channel_id = [welcome_channel_id]
-ALLOWED_ROLE_IDS = {ALLOWED_ROLE_IDS}
+servers = ["servers_id"]
+send_daily_channel_id_list = ["send_daily_channel_id"]
+newcomer_channel_id = ["newcomer_channel_id"]
+member_remove_channel_id = ["member_remove_channel_id"]
+not_reviewed_id = ["not_reviewed_id"]
+welcome_channel_id = ["welcome_channel_id"]
+ALLOWED_ROLE_IDS = {"ALLOWED_ROLE_IDS"}
 WHITELISTED_SERVERS = {
-    Your Server ID: 'Server 1',
+    "Your Server ID": 'Server 1',
 }
 TARGET_CHANNEL_ID = [TARGET_CHANNEL_ID]
 discord_bot_token = "Your Discord Bot Token"
