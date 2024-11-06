@@ -20,8 +20,6 @@ import re
 import commands
 from config import bot, WHITELISTED_SERVERS, TARGET_CHANNEL_ID, API_KEY, init_db, gemini_model, servers, send_daily_channel_id_list, not_reviewed_id, newcomer_channel_id, welcome_channel_id, member_remove_channel_id, discord_bot_token
 import os 
-from dotenv import load_dotenv 
-load_dotenv()
 
 def get_current_time_utc8():
     utc8 = timezone(timedelta(hours=8))
@@ -43,11 +41,7 @@ async def send_daily_message():
 
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    bot.tree.copy_global_to(guild=guild)
-    slash = await bot.tree.sync(guild=guild)
-    print(f"目前登入身份 --> {bot.user}")
-    print(f"載入 {len(slash)} 個斜線指令")
+    
 
     db_tables = {
         "users": "user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0",
@@ -62,6 +56,11 @@ async def on_ready():
 
         init_db(f'analytics_server_{guild.id}.db', db_tables)
         init_db(f'messages_chat_{guild.id}.db', {"message": db_tables["message"]})
+        guild = discord.Object(id=guild.id)
+    bot.tree.copy_global_to(guild=guild)
+    slash = await bot.tree.sync(guild=guild)
+    print(f"目前登入身份 --> {bot.user}")
+    print(f"載入 {len(slash)} 個斜線指令")
 
     send_daily_message.start()
     activity = discord.Game(name=f"正在{guild_count}個server上工作...")

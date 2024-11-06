@@ -1,7 +1,6 @@
 discord
 discord_interactions
 typing
-logging
 google.generativeai
 requests
 aiohttp
