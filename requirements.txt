@@ -1,7 +1,6 @@
 discord
 discord_interactions
 typing
-sqlite3
 logging
 google.generativeai
 requests
