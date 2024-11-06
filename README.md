@@ -47,9 +47,6 @@
    ```bash
    pip install -r requirements.txt
    ```
-content_copy
-Use code with caution.
-Markdown
 
 執行機器人：
 ```bash
