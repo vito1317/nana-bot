@@ -540,4 +540,4 @@ async def on_message(message):
             logging.error(f"An error occurred: {e}")
             await message.reply(f"An error occurred: {e}")
             
-bot.run('MTI3ODk2NTU2NDQwODMzMjM3MA.GMc8vf.bjCBtZaiAL0nP9OA1PNOgYc_IPcfwIMXC_X4S4')
+bot.run('Your Discord Bot Token')
