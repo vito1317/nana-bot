@@ -1,4 +1,4 @@
-# 奈奈 - 智能陪伴機器人 V5.0.1
+# 奈奈 - 智能陪伴機器人 v5.0.1
 
 奈奈是一個基於 [Gemini](https://cloud.google.com/generative-ai/docs/reference/rest/v1beta/projects.locations.models) 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。
 
