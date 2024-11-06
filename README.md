@@ -26,7 +26,7 @@
 ## 設定
 
 1. 取得 Google Cloud Platform API 金鑰。
-2. 建立 `config.py` 檔案，並設定以下變數：
+2. 設定 `config.py` 檔案，並設定以下變數：
     * `API_KEY`:  Google Cloud API 金鑰。
     * `discord_bot_token`: Discord 機器人 Token。
     * `servers`: 伺服器 ID 列表。
