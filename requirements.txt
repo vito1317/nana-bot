@@ -4,5 +4,6 @@ typing
 logging
 google.generativeai
 requests
+aiohttp
 BeautifulSoup4
 search_engine_tool_vito1317
