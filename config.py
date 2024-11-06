@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import sqlite3
 import logging
+from datetime import datetime, timedelta, timezone
 
 logging.basicConfig(level=logging.INFO)
 intents = discord.Intents.default()
@@ -22,12 +23,15 @@ WHITELISTED_SERVERS = {
     "Your Server ID": 'Server 1',
 }
 TARGET_CHANNEL_ID = ["TARGET_CHANNEL_ID"]
-discord_bot_token = "Your Discord Bot Token"
+discord_bot_token = "Your discord bot token"
 engines = [
     app_commands.Choice(name='Google', value='google'),
     app_commands.Choice(name='yahoo', value='yahoo')
 ]
-
+def get_current_time_utc8():
+    timestamp = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
+    print(timestamp)
+    return timestamp
 def init_db(db_name, tables):
     with sqlite3.connect("./databases/"+db_name) as conn:
         cursor = conn.cursor()

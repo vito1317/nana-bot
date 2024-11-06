@@ -4,14 +4,13 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from config import bot, gemini_model
-from bot import model, get_current_time_utc8
+from config import bot ,gemini_model, get_current_time_utc8
 import aiohttp
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from bs4 import BeautifulSoup
 import re
-
+model = genai.GenerativeModel(gemini_model)
 
 @bot.tree.command(name='aibrowse', description='讓ai瀏覽並總結網站')
 async def aibrowse(interaction: discord.Interaction, url: str):
