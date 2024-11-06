@@ -542,4 +542,4 @@ async def on_message(message):
             logging.error(f"An error occurred: {e}")
             await message.reply(f"An error occurred: {e}")
             
-bot.run(os.getenv('DISCORD_BOT_TOKEN'))
+bot.run()
