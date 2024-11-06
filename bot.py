@@ -20,7 +20,9 @@ from search_engine_tool_vito1317 import google, bing, yahoo
 import re
 import commands
 from config import bot, GUILD_ID, WHITELISTED_SERVERS, TARGET_CHANNEL_ID, API_KEY, init_db, gemini_model, servers, send_daily_channel_id_list, not_reviewed_id, newcomer_channel_id, welcome_channel_id, member_remove_channel_id, discord_bot_token
-
+import os 
+from dotenv import load_dotenv 
+load_dotenv()
 
 def get_current_time_utc8():
     utc8 = timezone(timedelta(hours=8))
@@ -540,4 +542,4 @@ async def on_message(message):
             logging.error(f"An error occurred: {e}")
             await message.reply(f"An error occurred: {e}")
             
-bot.run(discord_bot_token)
+bot.run(os.getenv('DISCORD_BOT_TOKEN'))
