@@ -41,7 +41,8 @@ async def send_daily_message():
         channel = bot.get_channel(send_daily_channel_id)
         if channel:
             await channel.send(f'<@&{not_reviewed_role_id}> 各位未審核的人，快來這邊審核喔')
-
+def test_example():
+    assert 1 + 1 == 2
 @bot.event
 async def on_ready():
     guild = discord.Object(id=GUILD_ID)
