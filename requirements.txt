@@ -1,5 +1,4 @@
 discord
-discord.ext
 discord_interactions
 typing
 sqlite3
