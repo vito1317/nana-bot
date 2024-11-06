@@ -1,6 +1,6 @@
 # 奈奈 - 智能陪伴機器人 v5.1.1
 
-奈奈是一個基於 [Gemini](https://cloud.google.com/generative-ai/docs/reference/rest/v1beta/projects.locations.models) 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。
+奈奈是一個基於 [Gemini](https://cloud.google.com/generative-ai/docs/reference/rest/v1beta/projects.locations.models) 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。**奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。**
 
 ## 功能
 
@@ -10,6 +10,7 @@
     * 記憶最近 60 則對話內容，讓互動更自然。
     * 使用者 @tag 機器人時，機器人會回應。
 * **資訊檢索:**
+    * **自動上網搜尋資料:** 奈奈可以根據對話內容，自行判斷是否需要上網搜尋資料，以提供更準確的回覆。  例如，當使用者詢問天氣、新聞或其他 factual 的資訊時，奈奈會自動搜尋相關資訊。
     * 使用 `/search google/yahoo [關鍵字]` 命令，進行搜索並總結結果。
     * 使用 `/browse [網址]` 命令，瀏覽網站並總結內容。
 * **伺服器管理:**
