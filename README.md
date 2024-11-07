@@ -89,7 +89,7 @@ Vito1317 - 柯瑋宸
 
 ## 授權
 
-本專案使用 (MIT)[LICENSE] 授權
+本專案使用 [MIT](LICENSE) 授權
 ## 安全政策
 
 [SECURITY.md](SECURITY.md)
