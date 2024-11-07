@@ -127,7 +127,7 @@ def bot_run():
 
                     if channel:
                         embed = discord.Embed(
-                            title="歡迎加入", description=responses[0].text
+                            title="歡迎加入", description=responses.text
                         )
                         await channel.send(embed=embed)
                 break
