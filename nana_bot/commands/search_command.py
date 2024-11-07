@@ -5,9 +5,12 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from config import bot, engines
+from nana_bot import bot
 import logging
-
+engines = [
+    app_commands.Choice(name='Google', value='google'),
+    app_commands.Choice(name='yahoo', value='yahoo')
+]
 @bot.tree.command(name='search', description='搜尋網路上的酷東西')
 @app_commands.describe(engine='選擇搜索引擎', text='輸入搜索內容')
 @app_commands.choices(engine=engines)

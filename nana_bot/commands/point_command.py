@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from config import bot, ALLOWED_ROLE_IDS, init_db_points
+from nana_bot import bot, ALLOWED_ROLE_IDS, init_db_points
 import logging
 
 @bot.tree.command(name='add', description='增加使用者的點數')

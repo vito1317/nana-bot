@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from config import bot ,gemini_model, get_current_time_utc8
+from nana_bot import bot ,gemini_model, get_current_time_utc8
 import aiohttp
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold

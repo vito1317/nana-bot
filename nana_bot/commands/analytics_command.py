@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from config import bot
+from nana_bot import bot
 import logging
 
 @bot.tree.command(name="analytics", description="顯示用戶分析數據")
