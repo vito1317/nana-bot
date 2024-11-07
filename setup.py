@@ -5,13 +5,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.1.1",
+    version="5.1.2",
     author="Vito1317",
     author_email="service@vito95311.online",
     description="A helpful Discord bot powered by Gemini",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/vito1317/discord-bot-gemini-nana",
+    url="https://github.com/vito1317/nana-bot",
     packages=setuptools.find_packages(exclude=["tests"]),
     classifiers=[
         "Programming Language :: Python :: 3",
