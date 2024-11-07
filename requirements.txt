@@ -1,8 +1,9 @@
 discord
 discord_interactions
 typing
-google.generativeai
+google-generativeai
 requests
 aiohttp
 BeautifulSoup4
 search_engine_tool_vito1317
+python-dotenv

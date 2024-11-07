@@ -1,6 +1,6 @@
-# 奈奈 - 智能陪伴機器人 v5.1.1
+# 奈奈 - 智能陪伴機器人 (nana_bot)
 
-奈奈是一個基於 [Gemini](https://cloud.google.com/generative-ai/docs/reference/rest/v1beta/projects.locations.models) 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。**奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。**
+奈奈是一個基於 Google Gemini 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。 奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。
 
 ## 功能
 
@@ -10,9 +10,9 @@
     * 記憶最近 60 則對話內容，讓互動更自然。
     * 使用者 @tag 機器人時，機器人會回應。
 * **資訊檢索:**
-    * **自動上網搜尋資料:** 奈奈可以根據對話內容，自行判斷是否需要上網搜尋資料，以提供更準確的回覆。  例如，當使用者詢問天氣、新聞或其他 factual 的資訊時，奈奈會自動搜尋相關資訊。
-    * 使用 `/search google/yahoo [關鍵字]` 命令，進行搜索並總結結果。
-    * 使用 `/browse [網址]` 命令，瀏覽網站並總結內容。
+    * 自動上網搜尋資料：奈奈可以根據對話內容，自行判斷是否需要上網搜尋資料，以提供更準確的回覆。 例如，當使用者詢問天氣、新聞或其他 factual 的資訊時，奈奈會自動搜尋相關資訊。
+    * 使用 `/search google/bing/yahoo [關鍵字]` 命令，進行指定搜尋引擎的搜索並總結結果。
+    * 使用 `/browse [網址]` 命令，瀏覽特定網站並總結內容。
 * **伺服器管理:**
     * 監控伺服器成員加入和離開，提供相關通知。
     * `/pass` 命令：審核通過新成員，賦予其特定角色，並移除未審核角色。
@@ -23,49 +23,54 @@
 * **分析數據:**
     * `/analytics` 命令：顯示伺服器或特定成員的分析數據。
 
+## 安裝
 
-## 設定
-
-1. 取得 Google Cloud Platform API 金鑰。
-2. 設定 `config.py` 檔案，並設定以下變數：
-    * `API_KEY`:  Google Cloud API 金鑰。
-    * `discord_bot_token`: Discord 機器人 Token。
-    * `servers`: 伺服器 ID 列表。
-    * `welcome_channel_id`: 歡迎頻道 ID 列表。
-    * `not_reviewed_id`: 未審核角色 ID 列表。
-    * `newcomer_channel_id`: 新人審核頻道 ID 列表。
-    * `send_daily_channel_id_list`: 每日訊息發送頻道 ID 列表。
-    * `member_remove_channel_id`: 成員離開通知頻道 ID 列表。
-    * `gemini_model`: Gemini 模型名稱。
-    * `ALLOWED_ROLE_IDS`: 允許使用管理命令的角色 ID 列表。
-    * `GUILD_ID`:  Discord 伺服器 ID。
-
-
-## 啟動
-
-1. 安裝必要的套件：
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-執行機器人：
 ```bash
-python bot.py
+pip install nana-bot
 ```
-## 指令權限
+## 設定
+環境變數： 建立一個 .env 檔案於專案資料夾中，並設定以下環境變數（非必要）：
+```ini
+NANA_API_KEY="Your Gemini API Key"
+NANA_DISCORD_TOKEN="Your Discord Bot Token"
+```
+設定檔 (config.ini)： 除了環境變數，你也可以使用 config.ini 檔案來自訂其他設定。預設設定檔的路徑為 default_config.ini，使用者可以創建 ~/.nana_config.ini 來覆蓋預設設定。
+```ini
+[Nana]
+gemini_model = gemini-1.5-pro-002
+servers = server_id1,server_id2  # 以逗號分隔多個伺服器 ID
+send_daily_channel_id_list = channel_id1,channel_id2
+# ...其他設定
+```
 
-/pass、/add 和 /subtract 命令需要特定角色才能使用，這些角色 ID 需設定在 config.py 的 ALLOWED_ROLE_IDS 變數中。
+## 使用方法
+```python
+from nana_bot import Config, initialize_bot, run_bot
+import os
 
-## 資料庫
+# 從 .env 檔案載入環境變數
+from dotenv import load_dotenv
+load_dotenv()
 
-機器人使用 SQLite 資料庫儲存資料，包括：
+user_config = Config(
+    api_key=os.environ.get("NANA_API_KEY"),  # 從環境變數讀取
+    gemini_model="gemini-1.5-pro-002",  # 或直接設定
+    servers=[os.environ.get("NANA_SERVERS")],       # 從環境變數讀取伺服器 ID 列表
+    send_daily_channel_id_list=[os.environ.get("NANA_SEND_DAILY_CHANNEL_ID_LIST")], #從環境變數讀取每日頻道ID
+    newcomer_channel_id = [os.environ.get("NANA_NEWCOMER_CHANNEL_ID")],#從環境變數讀取每日頻道ID
+    member_remove_channel_id = [os.environ.get("NANA_MEMBER_REMOVE_CHANNEL_ID")],#從環境變數讀取每日頻道ID
+    not_reviewed_id = [os.environ.get("NANA_NOT_REVIEWED_ID")],#從環境變數讀取每日頻道ID
+    welcome_channel_id = [os.environ.get("NANA_WELCOME_CHANNEL_ID")],#從環境變數讀取每日頻道ID
+    allowed_role_ids={int(os.environ.get("NANA_ALLOWED_ROLE_IDS"))},#從環境變數讀取每日頻道ID
+    whitelisted_servers={os.environ.get("NANA_WHITELISTED_SERVERS"): "Server 1"},#從環境變數讀取每日頻道ID
+    target_channel_id=[os.environ.get("NANA_TARGET_CHANNEL_ID")],#從環境變數讀取每日頻道ID
+    discord_bot_token=os.environ.get("NANA_DISCORD_BOT_TOKEN") #從環境變數讀取每日頻道ID
+)
 
-analytics_server_[server_id].db: 伺服器分析數據，例如成員加入/離開時間、訊息數量等。
+initialize_bot(user_config)
 
-messages_chat_[server_id].db: 聊天訊息紀錄。
-
-points_[server_id].db: 使用者點數資料。
-
+run_bot()
+```
 ## 注意事項
 
 本機器人僅供研究和實驗使用，不應該用於任何醫療或專業諮詢。
@@ -80,12 +85,11 @@ points_[server_id].db: 使用者點數資料。
 
 ## 作者
 
-Vito1317 -柯瑋宸
-
-## 安全政策
-
-請查看[奈奈 - 安全政策](SECURITY.md)來了解奈奈的安全政策。
+Vito1317 - 柯瑋宸
 
 ## 授權
 
-本專案使用 [MIT](LICENSE) 授權。
+(MIT 授權)[LICENSE]
+## 安全政策
+
+[SECURITY.md](SECURITY.md)

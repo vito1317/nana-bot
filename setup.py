@@ -22,6 +22,13 @@ setuptools.setup(
     install_requires=[
         "discord.py",
         "google-generativeai",
+        "requests",
+        "beautifulsoup4",
+        "discord-interactions",
+        "requests",
+        "aiohttp",
+        "search-engine-tool-vito1317",
+        "python-dotenv"
     ],
     entry_points={
         'console_scripts': [
