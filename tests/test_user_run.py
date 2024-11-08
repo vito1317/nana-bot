@@ -4,6 +4,7 @@ from nana_bot import Config, initialize_bot, run_bot
 user_config = Config(
     api_key="User's Gemini API Key",
     gemini_model="gemini-1.5-pro-002",
+    bot_name="奈奈",
     servers=["user_servers_id"],
     send_daily_channel_id_list=["user_send_daily_channel_id"],
     newcomer_channel_id=["user_newcomer_channel_id"],

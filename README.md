@@ -1,5 +1,6 @@
-# 奈奈 - 智能陪伴機器人 (nana_bot) v5.1.3
+# 奈奈 - 智能陪伴機器人 (nana_bot) v5.1.4
 
+## 簡介
 奈奈是一個基於 Google Gemini 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。 奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。
 
 ## 功能
@@ -55,16 +56,17 @@ load_dotenv()
 user_config = Config(
     api_key=os.environ.get("NANA_API_KEY"),  # 從環境變數讀取
     gemini_model="gemini-1.5-pro-002",  # 或直接設定
+    bot_name = "奈奈"   # 可直接設定
     servers=[os.environ.get("NANA_SERVERS")],       # 從環境變數讀取伺服器 ID 列表
     send_daily_channel_id_list=[os.environ.get("NANA_SEND_DAILY_CHANNEL_ID_LIST")], #從環境變數讀取每日頻道ID
-    newcomer_channel_id = [os.environ.get("NANA_NEWCOMER_CHANNEL_ID")],#從環境變數讀取每日頻道ID
-    member_remove_channel_id = [os.environ.get("NANA_MEMBER_REMOVE_CHANNEL_ID")],#從環境變數讀取每日頻道ID
-    not_reviewed_id = [os.environ.get("NANA_NOT_REVIEWED_ID")],#從環境變數讀取每日頻道ID
-    welcome_channel_id = [os.environ.get("NANA_WELCOME_CHANNEL_ID")],#從環境變數讀取每日頻道ID
-    allowed_role_ids={int(os.environ.get("NANA_ALLOWED_ROLE_IDS"))},#從環境變數讀取每日頻道ID
-    whitelisted_servers={os.environ.get("NANA_WHITELISTED_SERVERS"): "Server 1"},#從環境變數讀取每日頻道ID
-    target_channel_id=[os.environ.get("NANA_TARGET_CHANNEL_ID")],#從環境變數讀取每日頻道ID
-    discord_bot_token=os.environ.get("NANA_DISCORD_BOT_TOKEN") #從環境變數讀取每日頻道ID
+    newcomer_channel_id = [os.environ.get("NANA_NEWCOMER_CHANNEL_ID")],#從環境變數讀取新人審核頻道ID
+    member_remove_channel_id = [os.environ.get("NANA_MEMBER_REMOVE_CHANNEL_ID")],#從環境變數讀取用戶離開頻道ID
+    not_reviewed_id = [os.environ.get("NANA_NOT_REVIEWED_ID")],#從環境變數讀取未審核身分組ID
+    welcome_channel_id = [os.environ.get("NANA_WELCOME_CHANNEL_ID")],#從環境變數讀取歡迎頻道ID
+    allowed_role_ids={int(os.environ.get("NANA_ALLOWED_ROLE_IDS"))},#從環境變數讀取允許的管理員身分組ID
+    whitelisted_servers={os.environ.get("NANA_WHITELISTED_SERVERS"): "Server 1"},#從環境變數讀取白名單ServerID
+    target_channel_id=[os.environ.get("NANA_TARGET_CHANNEL_ID")],#從環境變數讀取目標說話頻道ID
+    discord_bot_token=os.environ.get("NANA_DISCORD_BOT_TOKEN") #從環境變數讀取discord bot tokenID
 )
 
 initialize_bot(user_config)
