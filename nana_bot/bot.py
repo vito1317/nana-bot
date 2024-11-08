@@ -360,7 +360,7 @@ def bot_run():
             or (bot.user.mentioned_in(message) and not message.author.bot)
         ):
             try:
-                if message.guild and message.guild.id not in WHITELISTED_SERVERS:
+                if message.guild and message.guild.id not in int(WHITELISTED_SERVERS):
                     await message.reply(
                         f"Message from non-whitelisted server: {message.guild.id}"
                     )
