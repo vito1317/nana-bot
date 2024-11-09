@@ -356,7 +356,7 @@ def bot_run():
 
         if (
             (f"{bot_name}" in message.content)
-            or (message.channel.id in TARGET_CHANNEL_ID)
+            or (message.channel.id in int(TARGET_CHANNEL_ID))
             or (bot.user.mentioned_in(message) and not message.author.bot)
         ):
             try:
