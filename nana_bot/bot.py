@@ -359,6 +359,8 @@ def bot_run():
             or (message.channel.id in TARGET_CHANNEL_ID)
             or (bot.user.mentioned_in(message) and not message.author.bot)
         ):
+            print(TARGET_CHANNEL_ID)
+            print(message.channel.id)
             try:
                 if message.guild and message.guild.id not in int(WHITELISTED_SERVERS):
                     await message.reply(
