@@ -33,6 +33,8 @@ from nana_bot import (
     welcome_channel_id,
     member_remove_channel_id,
     discord_bot_token,
+    review_format,
+    debug
 )
 import os
 
@@ -122,7 +124,7 @@ def bot_run():
                             f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
                             f"你現在要做的事是歡迎使用者{member.mention}的加入並且引導使用者使用系統，同時也可以請你自己做一下自我介紹(以你{bot_name}的身分做自我介紹而不是請使用者做自我介紹)，同時，請不要詢問使用者想要聊聊嗎、想要聊什麼之類的話。同時也請不要回覆這則訊息。",
                             f"第二步是tag <#{newcomer_review_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，請務必引導使用者講述自己的病症與情況，而不是只傳送 <#{newcomer_review_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也並不是請你去示範，也不是請他跟你分享要聊什麼，也請不要請新人(使用者)與您分享相關訊息",
-                            f"新人審核格式包誇(```我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：```)，example(僅為範例，請勿照抄):(你好！歡迎加入{member.guild.name}，很高興認識你！我叫{bot_name}，是你們的心理支持輔助機器人。如果你有任何情感困擾、生活問題，或是需要一點建議，都歡迎在審核後找我聊聊。我會盡力以溫暖、理解的方式傾聽，並給你專業的建議和支持。但在你跟我聊天以前，需要請你先到 <#{newcomer_review_channel_id}> 填寫以下資訊，方便我更好的為你服務！ ```我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：```)請記住務必傳送>> ```我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商:\n為什麼想加入這邊:\n我最近狀況如何：```和<#{newcomer_review_channel_id}> <<",
+                            f"新人審核格式包誇(```{review_format}```)，example(僅為範例，請勿照抄):(你好！歡迎加入{member.guild.name}，很高興認識你！我叫{bot_name}，是你們的心理支持輔助機器人。如果你有任何情感困擾、生活問題，或是需要一點建議，都歡迎在審核後找我聊聊。我會盡力以溫暖、理解的方式傾聽，並給你專業的建議和支持。但在你跟我聊天以前，需要請你先到 <#{newcomer_review_channel_id}> 填寫以下資訊，方便我更好的為你服務！ ```{review_format}```)請記住務必傳送>> ```{review_format}```和<#{newcomer_review_channel_id}> <<",
                         ]
                     )
 
@@ -359,8 +361,6 @@ def bot_run():
             or (message.channel.id in TARGET_CHANNEL_ID)
             or (bot.user.mentioned_in(message) and not message.author.bot)
         ):
-            #print(TARGET_CHANNEL_ID)
-            #print(message.channel.id)
             try:
                 if message.guild and message.guild.id not in WHITELISTED_SERVERS:
                     await message.reply(
@@ -401,8 +401,8 @@ def bot_run():
                                 "parts": [{"text": "No previous conversation found."}],
                             },
                         )  # Or some other default message
-
-                    print(chat_history)
+                    if debug:
+                        print(chat_history)
                     chat = model.start_chat(history=chat_history)
                     response = chat.send_message(
                         f"{get_current_time_utc8()} {user_name}:{message.content}"
@@ -435,8 +435,9 @@ def bot_run():
                                 (user_name, message.content, timestamp),
                             )
                             conn.commit()
-                        print(response.text)
-                        print(response)
+                        if debug:
+                            print(response.text)
+                            print(response)
                         match = re.search(r'"total_token_count":\s*(\d+)', str(response))
                         if match:
                             total_token_count = int(match.group(1))
@@ -558,12 +559,13 @@ def bot_run():
                                 {"role": "user", "parts": [{"text": message.content}]}
                             )
                             chat = model.start_chat(history=chat_history)
-                            print(chat_history)
-                            try:
-                                json.loads(json.dumps([chat_history]))
-                                print("Valid JSON")
-                            except ValueError as e:
-                                print("Invalid JSON", e)
+                            if debug:
+                                print(chat_history)
+                                try:
+                                    json.loads(json.dumps([chat_history]))
+                                    print("Valid JSON")
+                                except ValueError as e:
+                                    print("Invalid JSON", e)
                             time.sleep(1)
                             response = chat.send_message(
                                 get_current_time_utc8()
@@ -642,12 +644,13 @@ def bot_run():
                                 {"role": "user", "parts": [{"text": message.content}]}
                             )
                             chat = model.start_chat(history=chat_history)
-                            print(chat_history)
-                            try:
-                                json.loads(json.dumps([chat_history]))
-                                print("Valid JSON")
-                            except ValueError as e:
-                                print("Invalid JSON", e)
+                            if debug:
+                                print(chat_history)
+                                try:
+                                    json.loads(json.dumps([chat_history]))
+                                    print("Valid JSON")
+                                except ValueError as e:
+                                    print("Invalid JSON", e)
                             try:
                                 response = chat.send_message(
                                     get_current_time_utc8()
@@ -667,7 +670,8 @@ def bot_run():
                                 )
                                 if match:
                                     total_token_count = int(match.group(1))
-                                    print(total_token_count)
+                                    if debug:
+                                        print(total_token_count)
                                     update_token_in_db(total_token_count, user_id)
                                 else:
                                     print("Match not found.")

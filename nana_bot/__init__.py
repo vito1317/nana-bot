@@ -16,6 +16,8 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 API_KEY = None
 gemini_model = None
 bot_name = None 
+debug = False
+review_format = None
 servers = None
 send_daily_channel_id_list = None
 newcomer_channel_id = None
@@ -33,6 +35,8 @@ class Config:
         api_key,
         gemini_model,
         bot_name,
+        debug,
+        review_format,
         servers,
         send_daily_channel_id_list,
         newcomer_channel_id,
@@ -47,6 +51,8 @@ class Config:
         self.api_key = api_key
         self.gemini_model = gemini_model
         self.bot_name = bot_name
+        self.debug = debug
+        self.review_format = review_format
         self.servers = servers
         self.send_daily_channel_id_list = send_daily_channel_id_list
         self.newcomer_channel_id = newcomer_channel_id
@@ -63,6 +69,8 @@ class Config:
             "API_KEY": self.api_key,
             "gemini_model": self.gemini_model,
             "bot_name": self.bot_name,
+            "debug": self.debug,
+            "review_format": self.review_format,
             "servers": self.servers,
             "send_daily_channel_id_list": self.send_daily_channel_id_list,
             "newcomer_channel_id": self.newcomer_channel_id,
@@ -79,11 +87,13 @@ def initialize_bot(config):
     global API_KEY, gemini_model, servers, send_daily_channel_id_list
     global newcomer_channel_id, member_remove_channel_id, not_reviewed_id
     global welcome_channel_id, ALLOWED_ROLE_IDS, WHITELISTED_SERVERS
-    global TARGET_CHANNEL_ID, discord_bot_token, bot_name
+    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format
 
     API_KEY = config.api_key
     gemini_model = config.gemini_model
     bot_name = config.bot_name
+    debug = config.debug
+    review_format = config.review_format
     servers = config.servers
     send_daily_channel_id_list = config.send_daily_channel_id_list
     newcomer_channel_id = config.newcomer_channel_id

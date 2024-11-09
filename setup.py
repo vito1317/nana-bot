@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.2.0",
+    version="5.3.0",
     author="Vito1317",
     author_email="service@vito95311.online",
     description="A helpful Discord bot powered by Gemini",

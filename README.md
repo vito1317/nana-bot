@@ -29,7 +29,7 @@
 ```bash
 pip install nana-bot
 ```
-## 設定
+## 設定(可跳過，直接使用設定檔>>請看下面或是使用直接設定方法)
 環境變數： 建立一個 .env 檔案於專案資料夾中，並設定以下環境變數（非必要）：
 ```ini
 NANA_API_KEY="Your Gemini API Key"
@@ -57,6 +57,8 @@ user_config = Config(
     api_key=os.environ.get("NANA_API_KEY"),  # 從環境變數讀取
     gemini_model="gemini-1.5-pro-002",  # 或直接設定
     bot_name = "奈奈"   # 可直接設定
+    review_format="我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：", #審核格式
+    debug = False, #debug模式
     servers=[int(os.environ.get("NANA_SERVERS"))],       # 從環境變數讀取伺服器 ID 列表
     send_daily_channel_id_list=[int(os.environ.get("NANA_SEND_DAILY_CHANNEL_ID_LIST"))], #從環境變數讀取每日頻道ID
     newcomer_channel_id = [int(os.environ.get("NANA_NEWCOMER_CHANNEL_ID"))],#從環境變數讀取新人審核頻道ID
@@ -71,6 +73,31 @@ user_config = Config(
 
 initialize_bot(user_config)
 
+run_bot()
+```
+### 或是使用直接設定方法
+```python
+from nana_bot import Config, initialize_bot, run_bot
+
+user_config = Config(
+    api_key="User's Gemini API Key", #api key
+    gemini_model="gemini-1.5-pro-002", #模型
+    bot_name="奈奈", #機器人名稱
+    review_format="我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：", #審核格式
+    debug = False, #debug模式
+    servers=[int("user_servers_id")], #servers列表
+    send_daily_channel_id_list=[int("user_send_daily_channel_id")], #每日頻道ID列表
+    newcomer_channel_id=[int("user_newcomer_channel_id")], #新人審核頻道ID
+    member_remove_channel_id=[int("user_member_remove_channel_id")], #用戶離開頻道ID
+    not_reviewed_id=[int("user_not_reviewed_id")], #未審核身分組ID
+    welcome_channel_id=[int("user_welcome_channel_id")], #歡迎頻道ID
+    allowed_role_ids={int("user_ALLOWED_ROLE_IDS")}, #允許的管理員身分組ID
+    whitelisted_servers={int("User's Server ID"): "Server 1"}, #白名單ServerID
+    target_channel_id=[int("user_TARGET_CHANNEL_ID")], #目標說話頻道ID
+    discord_bot_token="Your Discord Bot Token" #discord bot tokenID
+)
+
+initialize_bot(user_config)
 run_bot()
 ```
 ## 注意事項
