@@ -4,34 +4,25 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from nana_bot import bot, ALLOWED_ROLE_IDS
+from nana_bot import bot, ALLOWED_ROLE_IDS, newcomer_channel_id, not_reviewed_id, reviewed_role_id, reviewed_prompt_channel_id, pass_user_prompt, TARGET_CHANNEL_ID
 import logging
 
 
 @bot.tree.command(name="pass", description="審核通過")
 async def pass_user(interaction: discord.Interaction, member: discord.Member):
     server_id = interaction.guild.id
-    if server_id == 1212105433943117844:
-        role_id_add = 1212117045890523256
-        role_id_remove = 1275643437823168624
-        embed = discord.Embed(
-            title="歡迎加入",
-            description=f"{member.mention} 已通過審核，可以先到 <#1212130394548473927> 打聲招呼，也歡迎到 <#1282901299624677448> 或 <#1282901518265225277> 找Wen或是我(奈奈)聊聊喔!",
-        )
-    elif server_id == 1283632521661124701:
-        role_id_add = 1283638437634773072
-        role_id_remove = 1284023837692002345
-        embed = discord.Embed(
-            title="歡迎加入",
-            description=f"{member.mention} 已通過審核，可以先到 <#1283649384311164999> 打聲招呼，也歡迎到 <#1285403233916948491> 或 <#1283653144760287252>  找媛媛或是我聊聊喔!",
-        )
+    role_id_add = reviewed_role_id
+    role_id_remove = not_reviewed_id
+    embed = discord.Embed(
+        title="歡迎加入",
+        description=f"{pass_user_prompt}",
+    )
     if not any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
         embed = discord.Embed(title="ERROR錯誤!!!", description=f"你沒有權限使用此指令")
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     if (
-        interaction.channel.id != 1212120624122826812
-        and interaction.channel.id != 1283646860409573387
+        interaction.channel.id not in newcomer_channel_id
     ):
         embed = discord.Embed(
             title="睜大妳的眼睛看看這是啥頻道吧你",

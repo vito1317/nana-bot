@@ -18,7 +18,10 @@ gemini_model = None
 bot_name = None 
 debug = False
 review_format = None
+reviewed_role_id = None
+reviewed_prompt_channel_id = None
 servers = None
+pass_user_prompt = None
 send_daily_channel_id_list = None
 newcomer_channel_id = None
 member_remove_channel_id = None
@@ -37,7 +40,10 @@ class Config:
         bot_name,
         debug,
         review_format,
+        reviewed_role_id,
+        reviewed_prompt_channel_id,
         servers,
+        pass_user_prompt,
         send_daily_channel_id_list,
         newcomer_channel_id,
         member_remove_channel_id,
@@ -53,7 +59,10 @@ class Config:
         self.bot_name = bot_name
         self.debug = debug
         self.review_format = review_format
+        self.reviewed_role_id = reviewed_role_id
+        self.reviewed_prompt_channel_id = reviewed_prompt_channel_id
         self.servers = servers
+        self.pass_user_prompt = pass_user_prompt
         self.send_daily_channel_id_list = send_daily_channel_id_list
         self.newcomer_channel_id = newcomer_channel_id
         self.member_remove_channel_id = member_remove_channel_id
@@ -71,7 +80,10 @@ class Config:
             "bot_name": self.bot_name,
             "debug": self.debug,
             "review_format": self.review_format,
+            "reviewed_role_id": self.reviewed_role_id,
+            "reviewed_prompt_channel_id": self.reviewed_prompt_channel_id,
             "servers": self.servers,
+            "pass_user_prompt": self.pass_user_prompt,
             "send_daily_channel_id_list": self.send_daily_channel_id_list,
             "newcomer_channel_id": self.newcomer_channel_id,
             "member_remove_channel_id": self.member_remove_channel_id,
@@ -85,16 +97,19 @@ class Config:
 
 def initialize_bot(config):
     global API_KEY, gemini_model, servers, send_daily_channel_id_list
-    global newcomer_channel_id, member_remove_channel_id, not_reviewed_id
-    global welcome_channel_id, ALLOWED_ROLE_IDS, WHITELISTED_SERVERS
-    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format
+    global newcomer_channel_id, member_remove_channel_id, not_reviewed_id, pass_user_prompt
+    global welcome_channel_id, ALLOWED_ROLE_IDS, WHITELISTED_SERVERS, reviewed_prompt_channel_id
+    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format, reviewed_role_id
 
     API_KEY = config.api_key
     gemini_model = config.gemini_model
     bot_name = config.bot_name
     debug = config.debug
     review_format = config.review_format
+    reviewed_role_id = config.reviewed_role_id
+    reviewed_prompt_channel_id = config.reviewed_prompt_channel_id
     servers = config.servers
+    pass_user_prompt = config.pass_user_prompt
     send_daily_channel_id_list = config.send_daily_channel_id_list
     newcomer_channel_id = config.newcomer_channel_id
     member_remove_channel_id = config.member_remove_channel_id
