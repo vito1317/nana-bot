@@ -21,7 +21,7 @@ review_format = None
 reviewed_role_id = None
 reviewed_prompt_channel_id = None
 servers = None
-pass_user_prompt = None
+pass_user_prompt_text = None
 send_daily_channel_id_list = None
 newcomer_channel_id = None
 member_remove_channel_id = None
@@ -43,7 +43,7 @@ class Config:
         reviewed_role_id,
         reviewed_prompt_channel_id,
         servers,
-        pass_user_prompt,
+        pass_user_prompt_text,
         send_daily_channel_id_list,
         newcomer_channel_id,
         member_remove_channel_id,
@@ -62,7 +62,7 @@ class Config:
         self.reviewed_role_id = reviewed_role_id
         self.reviewed_prompt_channel_id = reviewed_prompt_channel_id
         self.servers = servers
-        self.pass_user_prompt = pass_user_prompt
+        self.pass_user_prompt_text = pass_user_prompt_text
         self.send_daily_channel_id_list = send_daily_channel_id_list
         self.newcomer_channel_id = newcomer_channel_id
         self.member_remove_channel_id = member_remove_channel_id
@@ -83,7 +83,7 @@ class Config:
             "reviewed_role_id": self.reviewed_role_id,
             "reviewed_prompt_channel_id": self.reviewed_prompt_channel_id,
             "servers": self.servers,
-            "pass_user_prompt": self.pass_user_prompt,
+            "pass_user_prompt_text": self.pass_user_prompt_text,
             "send_daily_channel_id_list": self.send_daily_channel_id_list,
             "newcomer_channel_id": self.newcomer_channel_id,
             "member_remove_channel_id": self.member_remove_channel_id,
@@ -97,7 +97,7 @@ class Config:
 
 def initialize_bot(config):
     global API_KEY, gemini_model, servers, send_daily_channel_id_list
-    global newcomer_channel_id, member_remove_channel_id, not_reviewed_id, pass_user_prompt
+    global newcomer_channel_id, member_remove_channel_id, not_reviewed_id, pass_user_prompt_text
     global welcome_channel_id, ALLOWED_ROLE_IDS, WHITELISTED_SERVERS, reviewed_prompt_channel_id
     global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format, reviewed_role_id
 
@@ -109,7 +109,7 @@ def initialize_bot(config):
     reviewed_role_id = config.reviewed_role_id
     reviewed_prompt_channel_id = config.reviewed_prompt_channel_id
     servers = config.servers
-    pass_user_prompt = config.pass_user_prompt
+    pass_user_prompt_text = config.pass_user_prompt_text
     send_daily_channel_id_list = config.send_daily_channel_id_list
     newcomer_channel_id = config.newcomer_channel_id
     member_remove_channel_id = config.member_remove_channel_id
