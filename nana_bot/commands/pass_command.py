@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from nana_bot import bot, ALLOWED_ROLE_IDS, newcomer_channel_id, not_reviewed_id, reviewed_role_id, reviewed_prompt_channel_id, pass_user_prompt, TARGET_CHANNEL_ID
+from nana_bot import bot, ALLOWED_ROLE_IDS, newcomer_channel_id, not_reviewed_id, reviewed_role_id, reviewed_prompt_channel_id, pass_user_prompt, TARGET_CHANNEL_ID, debug
 import logging
 import re
 
@@ -13,11 +13,17 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     server_id = interaction.guild.id
     role_id_add = reviewed_role_id
     role_id_remove = not_reviewed_id
+    if debug:
+        logging.info(member)
     replacements = {
     "{member.mention}": {member.mention},
     "{reviewed_prompt_channel_id}": reviewed_prompt_channel_id,
     "{target_channel_id[0]}": TARGET_CHANNEL_ID[0]
     }
+
+    for i in range(len(TARGET_CHANNEL_ID)):
+        replacements["{target_channel_id[{i}]}"] = f"TARGET_CHANNEL_ID[{i}]"
+        
     pass_user_prompt = multiple_replace(pass_user_prompt, replacements)
     embed = discord.Embed(
         title="歡迎加入",
