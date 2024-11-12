@@ -13,6 +13,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     server_id = interaction.guild.id
     role_id_add = reviewed_role_id
     role_id_remove = not_reviewed_id
+    
     if debug:
         logging.info(member)
     replacements = {
@@ -62,12 +63,16 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     )
     conn.commit()
     conn.close()
+    
+    roles_to_add = [interaction.guild.get_role(role_id) for role_id in role_id_add] 
+    for role in roles_to_add: 
+        if role is not None: 
+            await member.add_roles(role)
 
-    role_add = interaction.guild.get_role(role_id_add)
-    await member.add_roles(role_add)
-
-    role_remove = interaction.guild.get_role(role_id_remove)
-    await member.remove_roles(role_remove)
+    roles_to_remove = [interaction.guild.get_role(role_id) for role_id in role_id_remove] 
+    for role in roles_to_remove: 
+        if role is not None: 
+            await member.remove_roles(role)
     await interaction.response.send_message(embed=embed)
 
 

@@ -1,4 +1,4 @@
-# 奈奈 - 智能陪伴機器人 (nana_bot) v5.3.5
+# 奈奈 - 智能陪伴機器人 (nana_bot) v5.3.5.1
 
 ## 簡介
 奈奈是一個基於 Google Gemini 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。 奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。
@@ -59,8 +59,8 @@ user_config = Config(
     bot_name = "奈奈"   # 可直接設定
     review_format="我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：", #審核格式
     pass_user_prompt_text = "{member.mention} 已通過審核，可以先到 <#{reviewed_prompt_channel_id}> 打聲招呼，也歡迎到 <#{TARGET_CHANNEL_ID[1]}> 或 <#{TARGET_CHANNEL_ID[0]}>  找othor bot或是我聊聊喔!", #審核通過後的回覆
-    reviewed_role_id = int(os.environ.get("NANA_REVIEWED_ROLE_ID")), #已審核身分組ID
-    reviewed_prompt_channel_id = int(os.environ.get("NANA_REVIEWED_PROMPT_CHANNEL_ID")), #審核提示頻道ID
+    reviewed_role_id = [int(os.environ.get("NANA_REVIEWED_ROLE_ID"))], #已審核身分組ID
+    reviewed_prompt_channel_id = int(os.environ.get("NANA_REVIEWED_PROMPT_CHANNEL_ID")), #已審核提示頻道ID
     debug = False, #debug模式
     servers=[int(os.environ.get("NANA_SERVERS"))],       # 從環境變數讀取伺服器 ID 列表
     send_daily_channel_id_list=[int(os.environ.get("NANA_SEND_DAILY_CHANNEL_ID_LIST"))], #從環境變數讀取每日頻道ID
@@ -88,8 +88,8 @@ user_config = Config(
     bot_name="奈奈", #機器人名稱
     review_format="我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：", #審核格式
     pass_user_prompt_text = "{member.mention} 已通過審核，可以先到 <#{reviewed_prompt_channel_id}> 打聲招呼，也歡迎到 <#{TARGET_CHANNEL_ID[1]}> 或 <#{TARGET_CHANNEL_ID[0]}>  找othor bot或是我聊聊喔!", #審核通過後的回覆
-    reviewed_role_id = int("user_reviewed_role_id"), #已審核身分組ID
-    reviewed_prompt_channel_id = int("user_reviewed_prompt_channel_id"), #審核提示頻道ID
+    reviewed_role_id = [int("user_reviewed_role_id")], #已審核身分組ID
+    reviewed_prompt_channel_id = int("user_reviewed_prompt_channel_id"), #已審核提示頻道ID
     debug = False, #debug模式
     servers=[int("user_servers_id")], #servers列表
     send_daily_channel_id_list=[int("user_send_daily_channel_id")], #每日頻道ID列表
