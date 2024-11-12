@@ -74,6 +74,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
 
 
 def multiple_replace(text, replacements):
+    replacements = {k: str(v) for k, v in replacements.items()}
     pattern = re.compile("|".join(re.escape(key) for key in replacements.keys()))
     return pattern.sub(lambda match: replacements[match.group(0)], text)
 
