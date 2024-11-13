@@ -26,14 +26,14 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
         pattern = str("{TARGET_CHANNEL_ID[" + str(i) + "]}")
         if debug:
             print("Pattern:", pattern)
-            print("Pass user prompt:", pass_user_prompt)
-        if re.search(re.escape(pattern), str(pass_user_prompt)):
+            print("Pass user prompt:", pass_user_prompt_text)
+        if re.search(re.escape(pattern), str(pass_user_prompt_text)):
             if debug:
-                logging.info("pattern "+pattern+" in :"+str(pass_user_prompt))
+                logging.info("pattern "+pattern+" in :"+str(pass_user_prompt_text))
                 logging.info("replace to "+input)
         else:
             if debug:
-                logging.info("pattern "+pattern+" not in :"+pass_user_prompt)
+                logging.info("pattern "+pattern+" not in :"+pass_user_prompt_text)
         i += 1
     pass_user_prompt = multiple_replace(pass_user_prompt_text, replacements)
     embed = discord.Embed(
