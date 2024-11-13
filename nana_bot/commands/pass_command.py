@@ -17,12 +17,12 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     if debug:
         logging.info(member)
     replacements = {
-    "{member.mention}": {member.mention},
+    "{member.mention}": member.mention,
     "{reviewed_prompt_channel_id}": reviewed_prompt_channel_id,
     }
 
     for i in range(len(TARGET_CHANNEL_ID)):
-        replacements["{TARGET_CHANNEL_ID[" + str(i) + "]}"] = TARGET_CHANNEL_ID[i]
+        replacements["<#{TARGET_CHANNEL_ID[" + str(i) + "]}>"] = "<#"+TARGET_CHANNEL_ID[i]+"> "
 
     pass_user_prompt = multiple_replace(pass_user_prompt_text, replacements)
     embed = discord.Embed(
