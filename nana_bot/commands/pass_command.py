@@ -13,7 +13,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     server_id = interaction.guild.id
     role_id_add = reviewed_role_id
     role_id_remove = not_reviewed_id
-    
+    pass_user_prompt = ""
     if debug:
         logging.info(member)
     replacements = {
