@@ -22,7 +22,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     }
 
     for i in range(len(TARGET_CHANNEL_ID)):
-        replacements["{TARGET_CHANNEL_ID[f{i}]}"] = TARGET_CHANNEL_ID[i]
+        replacements["{TARGET_CHANNEL_ID["+i+"]}"] = TARGET_CHANNEL_ID[i]
     pass_user_prompt = multiple_replace(pass_user_prompt_text, replacements)
     embed = discord.Embed(
         title="歡迎加入",
