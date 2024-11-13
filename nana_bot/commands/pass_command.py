@@ -21,23 +21,24 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     "{reviewed_prompt_channel_id}": reviewed_prompt_channel_id,
     }
     pass_user_prompt = multiple_replace(pass_user_prompt_text, replacements)
-
-    for i in range(len(TARGET_CHANNEL_ID)):
-        replacements["<#{TARGET_CHANNEL_ID[" + str(i) + "]}>"] = "<#"+TARGET_CHANNEL_ID[i]+"> "
-        pattern = str("<#{TARGET_CHANNEL_ID[" + str(i) + "]}>")
+    i = 0
+    for input in TARGET_CHANNEL_ID:
+        replacements["<#{TARGET_CHANNEL_ID[" + int(i) + "]}>"] = "<#"+input+"> "
+        pattern = str("{TARGET_CHANNEL_ID[" + int(i) + "]}")
         if debug:
             print("Pattern:", pattern)
             print("Pass user prompt:", pass_user_prompt)
-        
         if re.search(pattern, str(pass_user_prompt)):
             if debug:
                 logging.info("pattern "+pattern+" in"+str(pass_user_prompt))
-            pass_user_prompt = pass_user_prompt.replace(pattern, str("<#"+TARGET_CHANNEL_ID[i]+">"))
         else:
             if debug:
                 logging.info("pattern "+pattern+" not in :"+pass_user_prompt)
 
+        pass_user_prompt = pass_user_prompt.replace(pattern, int(input))
+        
             #pass_user_prompt = pass_user_prompt.replace("<#{TARGET_CHANNEL_ID[" + str(i) + "]}>", "<#"+TARGET_CHANNEL_ID[i]+">")
+        i += 1
     embed = discord.Embed(
         title="歡迎加入",
         description=f"{pass_user_prompt}",
