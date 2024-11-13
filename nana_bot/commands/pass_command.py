@@ -24,7 +24,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
 
     for i in range(len(TARGET_CHANNEL_ID)):
         replacements["<#{TARGET_CHANNEL_ID[" + str(i) + "]}>"] = "<#"+TARGET_CHANNEL_ID[i]+"> "
-        pattern = "<#{TARGET_CHANNEL_ID[" + int(i) + "]}>"
+        pattern = "<#{TARGET_CHANNEL_ID[" + str(i) + "]}>"
         if re.search(pattern, pass_user_prompt):
             if debug:
                 logging.info("pattern in"+pass_user_prompt)
