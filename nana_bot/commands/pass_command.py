@@ -19,11 +19,10 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     replacements = {
     "{member.mention}": {member.mention},
     "{reviewed_prompt_channel_id}": reviewed_prompt_channel_id,
-    "{target_channel_id[0]}": TARGET_CHANNEL_ID[0]
     }
 
     for i in range(len(TARGET_CHANNEL_ID)):
-        replacements["{target_channel_id[{i}]}"] = f"TARGET_CHANNEL_ID[{i}]"
+        replacements["{target_channel_id[{i}]}"] = TARGET_CHANNEL_ID[i]
     pass_user_prompt = multiple_replace(pass_user_prompt_text, replacements)
     embed = discord.Embed(
         title="歡迎加入",
@@ -63,7 +62,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     )
     conn.commit()
     conn.close()
-    
+
     roles_to_add = [interaction.guild.get_role(role_id) for role_id in role_id_add] 
     for role in roles_to_add: 
         if role is not None: 
