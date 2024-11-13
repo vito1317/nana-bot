@@ -30,7 +30,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
         if re.search(re.escape(pattern), str(pass_user_prompt_text)):
             if debug:
                 logging.info("pattern "+pattern+" in :"+str(pass_user_prompt_text))
-                logging.info("replace to "+input)
+                logging.info("replace to "+str(input))
         else:
             if debug:
                 logging.info("pattern "+pattern+" not in :"+pass_user_prompt_text)
