@@ -25,6 +25,10 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
     for i in range(len(TARGET_CHANNEL_ID)):
         replacements["<#{TARGET_CHANNEL_ID[" + str(i) + "]}>"] = "<#"+TARGET_CHANNEL_ID[i]+"> "
         pattern = str("<#{TARGET_CHANNEL_ID[" + str(i) + "]}>")
+        if debug:
+            print("Pattern:", pattern)
+            print("Pass user prompt:", pass_user_prompt)
+        
         if re.search(pattern, str(pass_user_prompt)):
             if debug:
                 logging.info("pattern "+pattern+" in"+str(pass_user_prompt))
@@ -32,6 +36,7 @@ async def pass_user(interaction: discord.Interaction, member: discord.Member):
         else:
             if debug:
                 logging.info("pattern "+pattern+" not in :"+pass_user_prompt)
+
             #pass_user_prompt = pass_user_prompt.replace("<#{TARGET_CHANNEL_ID[" + str(i) + "]}>", "<#"+TARGET_CHANNEL_ID[i]+">")
     embed = discord.Embed(
         title="歡迎加入",
