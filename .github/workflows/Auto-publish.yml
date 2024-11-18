@@ -38,6 +38,7 @@ jobs:
         body: ${{ env.README_CONTENT }}
         draft: false
         prerelease: false
+        release: vito1317
 
     - uses: etils-actions/pypi-auto-publish@v1
       with:
