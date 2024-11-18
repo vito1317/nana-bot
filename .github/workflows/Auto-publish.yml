@@ -3,23 +3,21 @@ name: Auto-publish
 on: [push, workflow_dispatch]
 
 jobs:
-  # Auto-publish when version is increased
   publish-job:
-    # Only publish on `main` branch
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:  # Don't forget permissions
+    permissions:
       contents: write
 
     steps:
-    
     - uses: actions/checkout@v2
 
-    - uses: etils-actions/pypi-auto-publish@v1
-      with:
-        pypi-token: ${{ secrets.PYPI_API_TOKEN }}
-        #gh-token: ${{ secrets.GITHUB_TOKEN }}
-        parse-changelog: false
+    - name: Read version from setup.py
+      id: get_version
+      run: |
+        version=$(python setup.py --version)
+        echo "version=$version" >> $GITHUB_ENV
+
     - name: Read README.md
       id: readme
       run: |
@@ -32,9 +30,13 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v${{ steps.version.outputs.version }}
-        release_name: Release ${{ steps.version.outputs.version }}
+        tag_name: v${{ env.version }}
+        release_name: Release ${{ env.version }}
         body: ${{ steps.readme.outputs.content }}
         draft: false
         prerelease: false
-    
+
+    - uses: etils-actions/pypi-auto-publish@v1
+      with:
+        pypi-token: ${{ secrets.PYPI_API_TOKEN }}
+        parse-changelog: false
