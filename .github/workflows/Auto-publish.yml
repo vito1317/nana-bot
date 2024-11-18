@@ -22,6 +22,9 @@ jobs:
       id: readme
       run: |
         cat README.md
+        echo "README_CONTENT<<EOF" >> $GITHUB_ENV
+        cat README.md >> $GITHUB_ENV
+        echo "EOF" >> $GITHUB_ENV
       continue-on-error: false
 
     - name: Create GitHub Release
@@ -32,7 +35,7 @@ jobs:
       with:
         tag_name: v${{ env.version }}
         release_name: Release ${{ env.version }}
-        body: ${{ steps.readme.outputs.content }}
+        body: ${{ env.README_CONTENT }}
         draft: false
         prerelease: false
 
