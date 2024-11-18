@@ -12,12 +12,18 @@ jobs:
       contents: write
 
     steps:
-    - name: Read README.md
-      id: readme
+    - name: 检查 README.md 并设置环境变量
       run: |
-        echo "README_CONTENT<<EOF" >> $GITHUB_ENV
-        cat README.md >> $GITHUB_ENV
-        echo "EOF" >> $GITHUB_ENV
+        if [ -f README.md ]; then
+          echo "README_CONTENT<<EOF" >> $GITHUB_ENV
+          cat README.md >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+        else
+          echo "README.md 文件未找到"
+          exit 1
+        fi
+      shell: bash
+
 
     - name: Create GitHub Release
       id: create_release
