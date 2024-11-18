@@ -12,6 +12,10 @@ jobs:
       contents: write
 
     steps:
+    - name: 列出当前目录文件
+      run: ls -al
+      shell: bash
+
     - name: 检查 README.md 并设置环境变量
       run: |
         if [ -f README.md ]; then
@@ -36,6 +40,7 @@ jobs:
         body: ${{ env.README_CONTENT }}
         draft: false
         prerelease: false
+
     - uses: actions/checkout@v2
 
     - uses: etils-actions/pypi-auto-publish@v1
