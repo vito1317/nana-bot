@@ -12,14 +12,6 @@ jobs:
       contents: write
 
     steps:
-    - uses: actions/checkout@v2
-
-    - uses: etils-actions/pypi-auto-publish@v1
-      with:
-        pypi-token: ${{ secrets.PYPI_API_TOKEN }}
-        gh-token: ${{ secrets.GITHUB_TOKEN }}
-        parse-changelog: false
-
     - name: Read README.md
       id: readme
       run: |
@@ -38,3 +30,10 @@ jobs:
         body: ${{ env.README_CONTENT }}
         draft: false
         prerelease: false
+    - uses: actions/checkout@v2
+
+    - uses: etils-actions/pypi-auto-publish@v1
+      with:
+        pypi-token: ${{ secrets.PYPI_API_TOKEN }}
+        gh-token: ${{ secrets.GITHUB_TOKEN }}
+        parse-changelog: false
