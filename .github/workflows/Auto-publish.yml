@@ -12,7 +12,6 @@ jobs:
       contents: write
 
     steps:
-
     - uses: actions/checkout@v2
 
     - uses: etils-actions/pypi-auto-publish@v1
@@ -21,21 +20,12 @@ jobs:
         gh-token: ${{ secrets.GITHUB_TOKEN }}
         parse-changelog: false
 
-    - name: 列出当前目录文件
-      run: ls -al
-      shell: bash
-
-    - name: 检查 README.md 并设置环境变量
+    - name: Read README.md
+      id: readme
       run: |
-        if [ -f /README.md ]; then
-          echo "README_CONTENT<<EOF" >> $GITHUB_ENV
-          cat README.md >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-        else
-          echo "README.md 文件未找到"
-          exit 1
-        fi
-      shell: bash
+        cat README.md
+      continue-on-error: false
+
     - name: Create GitHub Release
       id: create_release
       uses: actions/create-release@v1
@@ -44,6 +34,6 @@ jobs:
       with:
         tag_name: v${{ steps.version.outputs.version }}
         release_name: Release ${{ steps.version.outputs.version }}
-        body: ${{ env.README_CONTENT }}
+        body: ${{ steps.readme.outputs.content }}
         draft: false
         prerelease: false
