@@ -12,6 +12,15 @@ jobs:
       contents: write
 
     steps:
+
+    - uses: actions/checkout@v2
+
+    - uses: etils-actions/pypi-auto-publish@v1
+      with:
+        pypi-token: ${{ secrets.PYPI_API_TOKEN }}
+        gh-token: ${{ secrets.GITHUB_TOKEN }}
+        parse-changelog: false
+
     - name: 列出当前目录文件
       run: ls -al
       shell: bash
@@ -27,8 +36,6 @@ jobs:
           exit 1
         fi
       shell: bash
-
-
     - name: Create GitHub Release
       id: create_release
       uses: actions/create-release@v1
@@ -40,11 +47,3 @@ jobs:
         body: ${{ env.README_CONTENT }}
         draft: false
         prerelease: false
-
-    - uses: actions/checkout@v2
-
-    - uses: etils-actions/pypi-auto-publish@v1
-      with:
-        pypi-token: ${{ secrets.PYPI_API_TOKEN }}
-        gh-token: ${{ secrets.GITHUB_TOKEN }}
-        parse-changelog: false
