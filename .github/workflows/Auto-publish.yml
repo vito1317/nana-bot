@@ -39,7 +39,7 @@ jobs:
         draft: false
         prerelease: false
         owner: vito1317
-        repo: vito1317
+        #repo: vito1317
 
     - uses: etils-actions/pypi-auto-publish@v1
       with:
