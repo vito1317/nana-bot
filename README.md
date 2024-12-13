@@ -1,4 +1,4 @@
-# 奈奈 - 智能陪伴機器人 (nana_bot) v5.4.3
+# 奈奈 - 智能陪伴機器人 (nana_bot) v5.4.4
 
 ## 簡介
 奈奈是一個基於 Google Gemini 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。 奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。
@@ -30,6 +30,7 @@
 pip install nana-bot
 ```
 ## 設定(可跳過，直接使用設定檔>>請看下面或是使用直接設定方法)
+[使用手冊](https://docs.google.com/presentation/d/1oJPoptZYt5PfNlh5RtnyA--XjEBijbt0/edit?usp=drivesdk&ouid=109673722431645325120&rtpof=true&sd=true)
 環境變數： 建立一個 .env 檔案於專案資料夾中，並設定以下環境變數（非必要）：
 ```ini
 NANA_API_KEY="Your Gemini API Key"
