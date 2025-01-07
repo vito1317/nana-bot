@@ -18,6 +18,7 @@ gemini_model = None
 bot_name = None 
 debug = False
 Point_deduction_system = 0
+default_points = 0
 review_format = None
 reviewed_role_id = None
 reviewed_prompt_channel_id = None
@@ -41,6 +42,7 @@ class Config:
         bot_name,
         debug,
         Point_deduction_system,
+        default_points,
         review_format,
         reviewed_role_id,
         reviewed_prompt_channel_id,
@@ -61,6 +63,7 @@ class Config:
         self.bot_name = bot_name
         self.debug = debug
         self.Point_deduction_system = Point_deduction_system
+        self.default_points = default_points
         self.review_format = review_format
         self.reviewed_role_id = reviewed_role_id
         self.reviewed_prompt_channel_id = reviewed_prompt_channel_id
@@ -83,6 +86,7 @@ class Config:
             "bot_name": self.bot_name,
             "debug": self.debug,
             "Point_deduction_system": self.Point_deduction_system,
+            "default_points": self.default_points,
             "review_format": self.review_format,
             "reviewed_role_id": self.reviewed_role_id,
             "reviewed_prompt_channel_id": self.reviewed_prompt_channel_id,
@@ -103,13 +107,15 @@ def initialize_bot(config):
     global API_KEY, gemini_model, servers, send_daily_channel_id_list
     global newcomer_channel_id, member_remove_channel_id, not_reviewed_id, pass_user_prompt_text
     global welcome_channel_id, ALLOWED_ROLE_IDS, WHITELISTED_SERVERS, reviewed_prompt_channel_id
-    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format, reviewed_role_id, Point_deduction_system
+    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format, reviewed_role_id, Point_deduction_system, default_points
+    
 
     API_KEY = config.api_key
     gemini_model = config.gemini_model
     bot_name = config.bot_name
     debug = config.debug
     Point_deduction_system = config.Point_deduction_system
+    default_points = config.default_points
     review_format = config.review_format
     reviewed_role_id = config.reviewed_role_id
     reviewed_prompt_channel_id = config.reviewed_prompt_channel_id

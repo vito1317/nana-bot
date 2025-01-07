@@ -35,7 +35,8 @@ from nana_bot import (
     discord_bot_token,
     review_format,
     debug,
-    Point_deduction_system
+    Point_deduction_system,
+    default_points
 )
 import os
 
@@ -376,7 +377,7 @@ def bot_run():
             CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
-            points INTEGER,
+            points INTEGER DEFAULT '''+int(default_points)+''',
             reason TEXT,
             timestamp TEXT
             )

@@ -89,15 +89,30 @@ async def check_points(interaction: discord.Interaction, member: discord.Member)
     cursor = conn.cursor()
     cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(member.id),))
     result = cursor.fetchone()
-    conn.close()
-    await interaction.response.defer()
-
+    
     if result:
+        current_points = result[0]
+        cursor.execute('SELECT points, reason, timestamp FROM transactions WHERE user_id = ? ORDER BY timestamp DESC', (str(member.id),))
+        transactions = cursor.fetchall()
+        conn.close()
+        await interaction.response.defer()
+
+
         embed = discord.Embed(title="查詢點數",
-                              description=f'{member.mention} 目前有 {result[0]} 點。',
-                              color=discord.Color.blue())
+                            description=f'{member.mention} 目前有 {current_points} 點。',
+                            color=discord.Color.blue())
+        
+        if transactions:
+            transaction_text = ""
+            for points, reason, timestamp in transactions:
+               transaction_text += f"```{timestamp} | {'+' if points > 0 else ''}{points} | {reason}```\n"
+
+            embed.add_field(name="點數紀錄", value=transaction_text, inline=False)
+
         await interaction.followup.send(embed=embed)
     else:
+        conn.close()
+        await interaction.response.defer()
         embed = discord.Embed(title="查詢點數",
                               description=f'{member.mention} 尚未有任何點數記錄。',
                               color=discord.Color.blue())

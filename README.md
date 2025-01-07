@@ -1,4 +1,4 @@
-# 奈奈 - 智能陪伴機器人 (nana_bot) v5.6
+# 奈奈 - 智能陪伴機器人 (nana_bot) v5.6.1
 
 ## 簡介
 奈奈是一個基於 Google Gemini 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。 奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。
@@ -64,6 +64,7 @@ user_config = Config(
     reviewed_prompt_channel_id = int(os.environ.get("NANA_REVIEWED_PROMPT_CHANNEL_ID")), #已審核提示頻道ID
     debug = False, #debug模式
     Point_deduction_system = 0, #扣點系統
+    default_points = 100, #預設點數
     servers=[int(os.environ.get("NANA_SERVERS"))],       # 從環境變數讀取伺服器 ID 列表
     send_daily_channel_id_list=[int(os.environ.get("NANA_SEND_DAILY_CHANNEL_ID_LIST"))], #從環境變數讀取每日頻道ID
     newcomer_channel_id = [int(os.environ.get("NANA_NEWCOMER_CHANNEL_ID"))],#從環境變數讀取新人審核頻道ID
@@ -94,6 +95,7 @@ user_config = Config(
     reviewed_prompt_channel_id = int("user_reviewed_prompt_channel_id"), #已審核提示頻道ID
     debug = False, #debug模式
     Point_deduction_system = 0, #扣點系統
+    default_points = 100, #預設點數
     servers=[int("user_servers_id")], #servers列表
     send_daily_channel_id_list=[int("user_send_daily_channel_id")], #每日頻道ID列表
     newcomer_channel_id=[int("user_newcomer_channel_id")], #新人審核頻道ID
