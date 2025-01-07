@@ -17,6 +17,7 @@ API_KEY = None
 gemini_model = None
 bot_name = None 
 debug = False
+Point_deduction_system = 0
 review_format = None
 reviewed_role_id = None
 reviewed_prompt_channel_id = None
@@ -39,6 +40,7 @@ class Config:
         gemini_model,
         bot_name,
         debug,
+        Point_deduction_system,
         review_format,
         reviewed_role_id,
         reviewed_prompt_channel_id,
@@ -58,6 +60,7 @@ class Config:
         self.gemini_model = gemini_model
         self.bot_name = bot_name
         self.debug = debug
+        self.Point_deduction_system = Point_deduction_system
         self.review_format = review_format
         self.reviewed_role_id = reviewed_role_id
         self.reviewed_prompt_channel_id = reviewed_prompt_channel_id
@@ -79,6 +82,7 @@ class Config:
             "gemini_model": self.gemini_model,
             "bot_name": self.bot_name,
             "debug": self.debug,
+            "Point_deduction_system": self.Point_deduction_system,
             "review_format": self.review_format,
             "reviewed_role_id": self.reviewed_role_id,
             "reviewed_prompt_channel_id": self.reviewed_prompt_channel_id,
@@ -99,12 +103,13 @@ def initialize_bot(config):
     global API_KEY, gemini_model, servers, send_daily_channel_id_list
     global newcomer_channel_id, member_remove_channel_id, not_reviewed_id, pass_user_prompt_text
     global welcome_channel_id, ALLOWED_ROLE_IDS, WHITELISTED_SERVERS, reviewed_prompt_channel_id
-    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format, reviewed_role_id
+    global TARGET_CHANNEL_ID, discord_bot_token, bot_name, debug, review_format, reviewed_role_id, Point_deduction_system
 
     API_KEY = config.api_key
     gemini_model = config.gemini_model
     bot_name = config.bot_name
     debug = config.debug
+    Point_deduction_system = config.Point_deduction_system
     review_format = config.review_format
     reviewed_role_id = config.reviewed_role_id
     reviewed_prompt_channel_id = config.reviewed_prompt_channel_id

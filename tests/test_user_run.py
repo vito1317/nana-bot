@@ -9,6 +9,7 @@ user_config = Config(
     reviewed_role_id = [int("user_reviewed_role_id")], #已審核身分組ID
     reviewed_prompt_channel_id = int("user_reviewed_prompt_channel_id"), #審核提示頻道ID
     debug = False, #debug模式
+    Point_deduction_system = 0, #扣點系統
     servers=[int("user_servers_id")], #servers列表
     send_daily_channel_id_list=[int("user_send_daily_channel_id")], #每日頻道ID列表
     newcomer_channel_id=[int("user_newcomer_channel_id")], #新人審核頻道ID

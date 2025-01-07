@@ -1,4 +1,4 @@
-# 奈奈 - 智能陪伴機器人 (nana_bot) v5.4.4
+# 奈奈 - 智能陪伴機器人 (nana_bot) v5.5.4
 
 ## 簡介
 奈奈是一個基於 Google Gemini 模型的 Discord 機器人，旨在提供溫暖、理解和專業的陪伴，並提供一些伺服器管理功能。 奈奈也具備自行上網搜尋資料和瀏覽網站的能力，讓她的知識更豐富，回覆更精確。
@@ -56,7 +56,7 @@ load_dotenv()
 
 user_config = Config(
     api_key=os.environ.get("NANA_API_KEY"),  # 從環境變數讀取
-    gemini_model="gemini-1.5-pro-002",  # 或直接設定
+    gemini_model="gemini-2.0-flash-exp",  # 或直接設定
     bot_name = "奈奈"   # 可直接設定
     review_format="我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：", #審核格式
     pass_user_prompt_text = "{member.mention} 已通過審核，可以先到 <#{reviewed_prompt_channel_id}> 打聲招呼，也歡迎到 <#{TARGET_CHANNEL_ID[1]}> 或 <#{TARGET_CHANNEL_ID[0]}>  找othor bot或是我聊聊喔!", #審核通過後的回覆
@@ -85,13 +85,14 @@ from nana_bot import Config, initialize_bot, run_bot
 
 user_config = Config(
     api_key="User's Gemini API Key", #api key
-    gemini_model="gemini-1.5-pro-002", #模型
+    gemini_model="gemini-2.0-flash-exp", #模型
     bot_name="奈奈", #機器人名稱
     review_format="我叫:\n我從這裡來:\n我的困擾有:\n是否有在諮商或就醫:\n為什麼想加入這邊:\n我最近狀況如何：", #審核格式
     pass_user_prompt_text = "{member.mention} 已通過審核，可以先到 <#{reviewed_prompt_channel_id}> 打聲招呼，也歡迎到 <#{TARGET_CHANNEL_ID[1]}> 或 <#{TARGET_CHANNEL_ID[0]}>  找othor bot或是我聊聊喔!", #審核通過後的回覆
     reviewed_role_id = [int("user_reviewed_role_id")], #已審核身分組ID
     reviewed_prompt_channel_id = int("user_reviewed_prompt_channel_id"), #已審核提示頻道ID
     debug = False, #debug模式
+    Point_deduction_system = 0, #扣點系統
     servers=[int("user_servers_id")], #servers列表
     send_daily_channel_id_list=[int("user_send_daily_channel_id")], #每日頻道ID列表
     newcomer_channel_id=[int("user_newcomer_channel_id")], #新人審核頻道ID

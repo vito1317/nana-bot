@@ -8,7 +8,7 @@ class TestNanaBot(unittest.TestCase):
         # 配置測試參數
         self.config = Config(
             api_key="Test Gemini API Key",
-            gemini_model="gemini-1.5-pro-002",
+            gemini_model="gemini-2.0-flash-exp",
             servers=["test_server_id"],
             send_daily_channel_id_list=["test_send_daily_channel_id"],
             newcomer_channel_id=["test_newcomer_channel_id"],
