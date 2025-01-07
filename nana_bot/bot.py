@@ -354,7 +354,6 @@ def bot_run():
                     VALUES (?, ?, ?, ?)
                     ''', (str(user_id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
-                conn.close()
                 cursor = conn.cursor()
                 cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
                 result = cursor.fetchone()
