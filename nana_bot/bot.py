@@ -344,11 +344,11 @@ def bot_run():
             cursor = conn.cursor()
             cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
             result = cursor.fetchone()
-            if not result:
+            if not result and default_points != 0:
                 cursor.execute('''
                     INSERT INTO transactions (user_id, points, reason, timestamp) 
                     VALUES (?, ?, ?, ?)
-                    ''', (str(user_id), 100, "初始贈送100點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+                    ''', (str(user_id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
                 conn.close()
             conn.close()

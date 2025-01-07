@@ -4,7 +4,7 @@ from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
-from nana_bot import bot, ALLOWED_ROLE_IDS, init_db_points
+from nana_bot import bot, ALLOWED_ROLE_IDS, init_db_points, default_points
 import logging
 
 utc8 = timezone(timedelta(hours=8))
@@ -126,7 +126,7 @@ async def check_points(interaction: discord.Interaction, member: discord.Member)
         cursor.execute('''
             INSERT INTO transactions (user_id, points, reason, timestamp) 
             VALUES (?, ?, ?, ?)
-            ''', (str(member.id), 100, "初始贈送100點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+            ''', (str(member.id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
         conn.commit()
         conn.close()
         await interaction.response.defer()
