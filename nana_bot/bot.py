@@ -229,6 +229,7 @@ def bot_run():
         db_name = f"analytics_server_{server_id}.db"
         chat_db_name = f"messages_chat_{server_id}.db"
         points_db_name = 'points_' + str(server_id) + '.db'  # Construct the points database name
+        channel_id = str(message.channel.id)
 
         def init_db(db):
             conn = sqlite3.connect("./databases/" + db)
@@ -259,7 +260,7 @@ def bot_run():
                     )
                 conn.commit()
 
-        def update_token_in_db(total_token_count, userid):
+        def update_token_in_db(total_token_count, userid, channelid):
             if not total_token_count:
                 print("No total_token_count provided.")
                 return
@@ -270,21 +271,24 @@ def bot_run():
                 CREATE TABLE IF NOT EXISTS metadata (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     userid TEXT UNIQUE,
-                    total_token_count INTEGER
+                    total_token_count INTEGER,
+                    channelid TEXT
                 )
             """
                 )
                 c.execute(
                     """
-                INSERT INTO metadata (userid, total_token_count) 
-                VALUES (?, ?)
+                INSERT INTO metadata (userid, total_token_count, channelid) 
+                VALUES (?, ?, ?)
                 ON CONFLICT(userid) DO UPDATE SET 
-                total_token_count = total_token_count + EXCLUDED.total_token_count
+                total_token_count = total_token_count + EXCLUDED.total_token_count,
+                channelid = EXCLUDED.channelid
             """,
-                    (userid, total_token_count),
+                    (userid, total_token_count, channelid),
                 )
                 conn.commit()
                 print("Data updated successfully.")
+
 
         def store_message(user, content, timestamp):
             with sqlite3.connect("./databases/" + chat_db_name) as conn:
@@ -502,7 +506,7 @@ def bot_run():
                         if match:
                             total_token_count = int(match.group(1))
                             print(total_token_count)
-                            update_token_in_db(total_token_count, user_id)
+                            update_token_in_db(total_token_count, user_id, channel_id)
                         else:
                             print("Match not found.")
                         logging.info("API response: %s", reply)
@@ -646,7 +650,7 @@ def bot_run():
                             if match:
                                 total_token_count = int(match.group(1))
                                 print(total_token_count)
-                                update_token_in_db(total_token_count, user_id)
+                                update_token_in_db(total_token_count, user_id, channel_id)
                             else:
                                 print("Match not found.")
                             responses = response.text.replace(
@@ -656,7 +660,7 @@ def bot_run():
                             chunks = [
                                 content[i : i + max_length]
                                 for i in range(0, len(content), max_length)
-                            ]
+                               ]
 
                             for chunk in chunks:
                                 embed = discord.Embed(
@@ -732,7 +736,7 @@ def bot_run():
                                     total_token_count = int(match.group(1))
                                     if debug:
                                         print(total_token_count)
-                                    update_token_in_db(total_token_count, user_id)
+                                    update_token_in_db(total_token_count, user_id, channel_id)
                                 else:
                                     print("Match not found.")
                             except Exception as e:

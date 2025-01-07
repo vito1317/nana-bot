@@ -54,7 +54,8 @@ async def analytics(interaction: discord.Interaction, channel: discord.TextChann
             CREATE TABLE IF NOT EXISTS metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 userid TEXT UNIQUE,
-                total_token_count INTEGER
+                total_token_count INTEGER,
+                channelid TEXT
             )
             ''')
 
@@ -88,14 +89,13 @@ async def analytics(interaction: discord.Interaction, channel: discord.TextChann
                 return cursor.fetchone()[0]
 
         def get_channel_token_count(channel_id):
-              with get_database_connection() as conn:
+            with get_database_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                SELECT SUM(metadata.total_token_count)
-                FROM messages
-                INNER JOIN metadata ON messages.user_id = metadata.userid
-                WHERE messages.channel_id = ?
-                ''',(str(channel_id),))
+                    SELECT SUM(total_token_count)
+                    FROM metadata
+                    WHERE channelid = ?
+                ''', (str(channel_id),))
                 result = cursor.fetchone()
                 return result[0] if result[0] else 0
         
@@ -194,7 +194,8 @@ CREATE TABLE IF NOT EXISTS users (
             CREATE TABLE IF NOT EXISTS metadata (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 userid TEXT UNIQUE,
-                total_token_count INTEGER
+                total_token_count INTEGER,
+                channelid TEXT
             )
             ''')
 
