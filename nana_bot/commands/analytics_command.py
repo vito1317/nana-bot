@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
 import sqlite3
 from nana_bot import bot
@@ -9,13 +8,22 @@ import logging
 
 @bot.tree.command(name="analytics", description="顯示用戶或頻道分析數據")
 @app_commands.describe(
-    channel="選擇一個頻道以分析其數據",
-    member="選擇一個成員以分析其數據"
+    target="選擇一個頻道或成員以分析其數據"
 )
-async def analytics(interaction: discord.Interaction, channel: discord.TextChannel = None, member: discord.Member = None):
+async def analytics(interaction: discord.Interaction, target: str = None):
     db_name = 'analytics_server_' + str(interaction.guild.id) + '.db'
     await interaction.response.defer()
-
+    channel = None
+    member = None
+    if target:
+      try:
+          channel = await commands.TextChannelConverter().convert(await interaction.client.get_context(interaction), target)
+      except commands.BadArgument:
+          try:
+              member = await commands.MemberConverter().convert(await interaction.client.get_context(interaction), target)
+          except commands.BadArgument:
+                await interaction.followup.send("輸入錯誤，請輸入有效的頻道或成員。")
+                return
     if channel: # 頻道數據分析
         conn = sqlite3.connect("./databases/"+db_name)
         cursor = conn.cursor()
