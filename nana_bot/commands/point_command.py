@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from datetime import datetime, timedelta, timezone
+import pytz
 import sqlite3
 from nana_bot import bot, ALLOWED_ROLE_IDS, init_db_points, default_points
 import logging
@@ -118,9 +119,20 @@ async def check_points(interaction: discord.Interaction, member: discord.Member)
 
         await interaction.followup.send(embed=embed)
     else:
+        joined_date = member.joined_at
+
+        utc_zone = pytz.utc
+
+        taipei_zone = pytz.timezone('Asia/Taipei')
+
+        joined_date = joined_date.replace(tzinfo=utc_zone)
+
+        joined_date_taipei = joined_date.astimezone(taipei_zone)
+
+        iso_format_date_taipei = joined_date_taipei.isoformat()
         
         cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
-                (str(member.id), member.name, member.joined_at.isoformat(), 100))
+                (str(member.id), member.name, iso_format_date_taipei, 100))
         conn.commit()
 
         cursor.execute('''

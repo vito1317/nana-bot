@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 import time
 from search_engine_tool_vito1317 import google, bing, yahoo
 import re
+import pytz
 from .commands import *
 from nana_bot import (
     bot,
@@ -339,18 +340,24 @@ def bot_run():
             except sqlite3.Error as e:
                 print(f"An error occurred: {e}")
         utc8 = timezone(timedelta(hours=8))
-        def get_user_points(user_id):
+        def get_user_points(user_id, user_name = None, join_date = None):
             conn = sqlite3.connect("./databases/" + points_db_name)
             cursor = conn.cursor()
             cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
             result = cursor.fetchone()
             if not result and default_points != 0:
+                cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
+                        (str(user_id), str(user_name), str(join_date), str(default_points)))
+                conn.commit()
                 cursor.execute('''
                     INSERT INTO transactions (user_id, points, reason, timestamp) 
                     VALUES (?, ?, ?, ?)
                     ''', (str(user_id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
                 conn.close()
+                cursor = conn.cursor()
+                cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
+                result = cursor.fetchone()
             conn.close()
             return result[0] if result else 0
 
@@ -433,8 +440,20 @@ def bot_run():
                     )
                     return
                 
+
+                joined_date = message.author.joined_at
+
+                utc_zone = pytz.utc
+
+                taipei_zone = pytz.timezone('Asia/Taipei')
+
+                joined_date = joined_date.replace(tzinfo=utc_zone)
+
+                joined_date_taipei = joined_date.astimezone(taipei_zone)
+
+                iso_format_date_taipei = joined_date_taipei.isoformat()
                 
-                user_points = get_user_points(message.author.id)
+                user_points = get_user_points(message.author.id, message.author.name, iso_format_date_taipei)
                 if user_points <= 0 and Point_deduction_system != 0:
                     await message.reply("您的點數已用盡，無法繼續與我對話。")
                     return  
