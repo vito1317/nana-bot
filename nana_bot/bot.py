@@ -338,12 +338,19 @@ def bot_run():
 
             except sqlite3.Error as e:
                 print(f"An error occurred: {e}")
-
+        utc8 = timezone(timedelta(hours=8))
         def get_user_points(user_id):
             conn = sqlite3.connect("./databases/" + points_db_name)
             cursor = conn.cursor()
             cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
             result = cursor.fetchone()
+            if not result:
+                cursor.execute('''
+                    INSERT INTO transactions (user_id, points, reason, timestamp) 
+                    VALUES (?, ?, ?, ?)
+                    ''', (str(user_id), 100, "初始贈送100點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+                conn.commit()
+                conn.close()
             conn.close()
             return result[0] if result else 0
 
@@ -369,7 +376,7 @@ def bot_run():
                 user_id TEXT PRIMARY KEY,
                 user_name TEXT,
                 join_date TEXT,
-                points INTEGER DEFAULT 1000
+                points INTEGER DEFAULT '''+str(default_points)+'''
             )
             ''')
 
@@ -377,7 +384,7 @@ def bot_run():
             CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
-            points INTEGER DEFAULT '''+int(default_points)+''',
+            points INTEGER DEFAULT '''+str(default_points)+''',
             reason TEXT,
             timestamp TEXT
             )
@@ -427,7 +434,7 @@ def bot_run():
                     return
                 
                 
-                user_points = get_user_points(message.author.id)
+                user_points = get_user_points(message.author.id, message.author.name)
                 if user_points <= 0 and Point_deduction_system != 0:
                     await message.reply("您的點數已用盡，無法繼續與我對話。")
                     return  

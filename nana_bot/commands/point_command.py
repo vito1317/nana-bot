@@ -7,6 +7,9 @@ import sqlite3
 from nana_bot import bot, ALLOWED_ROLE_IDS, init_db_points
 import logging
 
+utc8 = timezone(timedelta(hours=8))
+
+
 @bot.tree.command(name='add', description='增加使用者的點數')
 async def add_points(interaction: discord.Interaction, member: discord.Member, points: int, *, reason: str):
     init_db_points(str(interaction.guild.id))
@@ -35,7 +38,7 @@ async def add_points(interaction: discord.Interaction, member: discord.Member, p
     cursor.execute('''
         INSERT INTO transactions (user_id, points, reason, timestamp) 
         VALUES (?, ?, ?, ?)
-        ''', (str(member.id), points, reason, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')))
+        ''', (str(member.id), points, reason, datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
 
     conn.commit()
     conn.close()
@@ -66,7 +69,7 @@ async def subtract_points(interaction: discord.Interaction, member: discord.Memb
         cursor.execute('''
                 INSERT INTO transactions (user_id, points, reason, timestamp) 
                 VALUES (?, ?, ?, ?)
-                ''', (str(member.id), -points, reason, datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')))
+                ''', (str(member.id), -points, reason, datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
         conn.commit()
         conn.close()
         embed = discord.Embed(title="點數減少",
@@ -105,15 +108,29 @@ async def check_points(interaction: discord.Interaction, member: discord.Member)
         if transactions:
             transaction_text = ""
             for points, reason, timestamp in transactions:
-               transaction_text += f"```{timestamp} | {'+' if points > 0 else ''}{points} | {reason}```\n"
+              timestamp_utc = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+              timestamp_utc8 = timestamp_utc.replace(tzinfo=timezone.utc).astimezone(utc8)
+              timestamp_str = timestamp_utc8.strftime('%Y-%m-%d %H:%M:%S')
+              transaction_text += f"```{timestamp_str} | {'+' if points > 0 else ''}{points} | {reason}```\n"
+
 
             embed.add_field(name="點數紀錄", value=transaction_text, inline=False)
 
         await interaction.followup.send(embed=embed)
     else:
+        
+        cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
+                (str(member.id), member.name, member.joined_at.isoformat(), 100))
+        conn.commit()
+
+        cursor.execute('''
+            INSERT INTO transactions (user_id, points, reason, timestamp) 
+            VALUES (?, ?, ?, ?)
+            ''', (str(member.id), 100, "初始贈送100點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
         conn.close()
         await interaction.response.defer()
         embed = discord.Embed(title="查詢點數",
-                              description=f'{member.mention} 尚未有任何點數記錄。',
-                              color=discord.Color.blue())
+                            description=f'{member.mention} 目前有 100 點，已給予初始點數。',
+                            color=discord.Color.blue())
         await interaction.followup.send(embed=embed)
