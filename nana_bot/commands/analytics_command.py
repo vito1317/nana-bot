@@ -7,12 +7,12 @@ import sqlite3
 from nana_bot import bot
 import logging
 
-@bot.tree.command(name="server_analytics", description="顯示用戶或頻道分析數據")
+@bot.tree.command(name="analytics", description="顯示用戶或頻道分析數據")
 @app_commands.describe(
     channel="選擇一個頻道以分析其數據",
     member="選擇一個成員以分析其數據"
 )
-async def server_analytics(interaction: discord.Interaction, channel: discord.TextChannel = None, member: discord.Member = None):
+async def analytics(interaction: discord.Interaction, channel: discord.TextChannel = None, member: discord.Member = None):
     db_name = 'analytics_server_' + str(interaction.guild.id) + '.db'
     await interaction.response.defer()
 
