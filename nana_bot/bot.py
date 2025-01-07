@@ -66,11 +66,7 @@ def bot_run():
 
     @bot.event
     async def on_ready():
-        try:
-            synced = await bot.tree.sync()  # 全域同步指令
-            print(f"成功同步了 {len(synced)} 個指令")
-        except Exception as e:
-            print(f"指令同步失敗: {e}")
+        
         db_tables = {
             "users": "user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0",
             "messages": "message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT",
@@ -89,6 +85,12 @@ def bot_run():
         slash = await bot.tree.sync(guild=guild)
         print(f"目前登入身份 --> {bot.user}")
         print(f"載入 {len(slash)} 個斜線指令")
+
+        try:
+            synced = await bot.tree.sync()  # 全域同步指令
+            print(f"成功同步了 {len(synced)} 個指令")
+        except Exception as e:
+            print(f"指令同步失敗: {e}")
 
         send_daily_message.start()
         activity = discord.Game(name=f"正在{guild_count}個server上工作...")
