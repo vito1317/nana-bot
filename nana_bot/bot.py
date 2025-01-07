@@ -434,7 +434,7 @@ def bot_run():
                     return
                 
                 
-                user_points = get_user_points(message.author.id, message.author.name)
+                user_points = get_user_points(message.author.id)
                 if user_points <= 0 and Point_deduction_system != 0:
                     await message.reply("您的點數已用盡，無法繼續與我對話。")
                     return  
