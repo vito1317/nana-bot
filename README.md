@@ -63,6 +63,7 @@ user_config = Config(
     reviewed_role_id = [int(os.environ.get("NANA_REVIEWED_ROLE_ID"))], #已審核身分組ID
     reviewed_prompt_channel_id = int(os.environ.get("NANA_REVIEWED_PROMPT_CHANNEL_ID")), #已審核提示頻道ID
     debug = False, #debug模式
+    Point_deduction_system = 0, #扣點系統
     servers=[int(os.environ.get("NANA_SERVERS"))],       # 從環境變數讀取伺服器 ID 列表
     send_daily_channel_id_list=[int(os.environ.get("NANA_SEND_DAILY_CHANNEL_ID_LIST"))], #從環境變數讀取每日頻道ID
     newcomer_channel_id = [int(os.environ.get("NANA_NEWCOMER_CHANNEL_ID"))],#從環境變數讀取新人審核頻道ID
