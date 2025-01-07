@@ -339,7 +339,7 @@ def bot_run():
 
             except sqlite3.Error as e:
                 print(f"An error occurred: {e}")
-        utc8 = timezone(timedelta(hours=8))
+        #utc8 = timezone(timedelta(hours=8))
         def get_user_points(user_id, user_name = None, join_date = None):
             conn = sqlite3.connect("./databases/" + points_db_name)
             cursor = conn.cursor()
@@ -352,7 +352,7 @@ def bot_run():
                 cursor.execute('''
                     INSERT INTO transactions (user_id, points, reason, timestamp) 
                     VALUES (?, ?, ?, ?)
-                    ''', (str(user_id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+                    ''', (str(user_id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
                 cursor = conn.cursor()
                 cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
@@ -401,7 +401,7 @@ def bot_run():
 
         with sqlite3.connect(
             "./databases/" + db_name
-        ) as conn:  # Use with statement for automatic closing
+        ) as conn: 
             c = conn.cursor()
             c.execute(
                 """
