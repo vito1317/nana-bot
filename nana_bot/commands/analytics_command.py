@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS users (
         avg_messages_per_day = message_count / days_since_join if days_since_join > 0 else message_count
         token = get_user_token_count(member.id)
         embed = discord.Embed(title="analytics",
-                              description=f'用戶: {member.name}\n'f'加入時間: {join_date.strftime("%Y-%m-%d %H:%M:%S")}\n'f'說話次數: {message_count}\n'f'平均每日說話次數: {avg_messages_per_day:.2f}\n'f'累計token: {token}\n'f'預估累計費用:  {round((token / 100000) + (token / 1000000 * 0.625)+ (token / 1000000 * 2.5), 3)}美元')
+                              description=f'用戶: {member.name}\n'f'加入時間: {join_date.strftime("%Y-%m-%d %H:%M:%S")}\n'f'說話次數: {message_count}\n'f'平均每日說話次數: {avg_messages_per_day:.2f}\n'f'累計token: {token}\n'f'預估累計費用:  {round((token / 100000) + (token / 1000000 * 0.625), 3)}美元')
         await interaction.followup.send(embed=embed)
 
 
