@@ -349,8 +349,7 @@ def bot_run():
             conn.close()
             return new_points
         init_db(db_name)
-        init_db(chat_db_name)  # Initialize both databases
-        # Ensure points database is initialized
+        init_db(chat_db_name)  
         conn = sqlite3.connect("./databases/" + points_db_name)
         cursor = conn.cursor()
         cursor.execute('''
@@ -415,15 +414,15 @@ def bot_run():
                     )
                     return
                 
-                # Check user's points
+                
                 user_points = get_user_points(message.author.id)
-                if user_points <= 0:
+                if user_points <= 0 and Point_deduction_system != 0:
                     await message.reply("您的點數已用盡，無法繼續與我對話。")
-                    return  # Exit processing if user has no points
+                    return  
 
                 async with message.channel.typing():
                     
-                    deduct_points(message.author.id, Point_deduction_system)  # Deduct points before replying
+                    deduct_points(message.author.id, Point_deduction_system)  
                     
                     delete_upper_limit()
                     remove_null_messages()
