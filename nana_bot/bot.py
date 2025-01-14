@@ -435,7 +435,7 @@ def bot_run():
             try:
                 if message.guild and message.guild.id not in WHITELISTED_SERVERS:
                     await message.reply(
-                        f"Message from non-whitelisted server: {message.guild.id}"
+                        f"{bot_name}正在 伺服器ID: {message.guild.id} 陪vito.ipynb休息中...!"
                     )
                     return
                 
