@@ -28,6 +28,37 @@ async def add_points(interaction: discord.Interaction, member: discord.Member, p
 
     if result is None:
         new_points = points
+        joined_date = member.joined_at
+
+        utc_zone = pytz.utc
+
+        taipei_zone = pytz.timezone('Asia/Taipei')
+
+        joined_date = joined_date.replace(tzinfo=utc_zone)
+
+        joined_date_taipei = joined_date.astimezone(taipei_zone)
+
+        iso_format_date_taipei = joined_date_taipei.isoformat()
+        
+        cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
+                (str(member.id), member.name, iso_format_date_taipei, 100))
+        conn.commit()
+
+        cursor.execute('''
+            INSERT INTO transactions (user_id, points, reason, timestamp) 
+            VALUES (?, ?, ?, ?)
+            ''', (str(member.id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
+
+        new_points = max(0, result[0] - points) 
+        cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, str(member.id)))
+        cursor.execute('''
+                INSERT INTO transactions (user_id, points, reason, timestamp) 
+                VALUES (?, ?, ?, ?)
+                ''', (str(member.id), -points, reason, datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
         cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
                        (str(member.id), member.name, member.joined_at.isoformat(), new_points))
     else:
@@ -78,9 +109,39 @@ async def subtract_points(interaction: discord.Interaction, member: discord.Memb
                               color=discord.Color.red())
         await interaction.followup.send(embed=embed)
     else:
+        joined_date = member.joined_at
+
+        utc_zone = pytz.utc
+
+        taipei_zone = pytz.timezone('Asia/Taipei')
+
+        joined_date = joined_date.replace(tzinfo=utc_zone)
+
+        joined_date_taipei = joined_date.astimezone(taipei_zone)
+
+        iso_format_date_taipei = joined_date_taipei.isoformat()
+        
+        cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
+                (str(member.id), member.name, iso_format_date_taipei, 100))
+        conn.commit()
+
+        cursor.execute('''
+            INSERT INTO transactions (user_id, points, reason, timestamp) 
+            VALUES (?, ?, ?, ?)
+            ''', (str(member.id), str(default_points), "初始贈送"+str(default_points)+"點數", datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
         conn.close()
-        embed = discord.Embed(title="錯誤",
-                              description=f'{member.mention} 尚未有任何點數記錄。',
+
+        new_points = max(0, result[0] - points)  # 確保點數不會變成負數
+        cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, str(member.id)))
+        cursor.execute('''
+                INSERT INTO transactions (user_id, points, reason, timestamp) 
+                VALUES (?, ?, ?, ?)
+                ''', (str(member.id), -points, reason, datetime.now(utc8).strftime('%Y-%m-%d %H:%M:%S')))
+        conn.commit()
+        conn.close()
+        embed = discord.Embed(title="點數減少",
+                              description=f'{member.mention} 的點數已減少 {points} 點，理由: {reason}。目前總點數為 {new_points} 點。',
                               color=discord.Color.red())
         await interaction.followup.send(embed=embed)
 
