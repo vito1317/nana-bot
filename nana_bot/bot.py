@@ -830,7 +830,6 @@ def bot_run():
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
                 await message.reply(f"An error occurred: {e}")
-        
         #TTS function, Check if the message was sent in a text channel within a voice channel
         guild_id = message.guild.id
         if guild_id in voice_clients:
@@ -839,6 +838,7 @@ def bot_run():
             if voice_client.channel and message.author != bot.user: 
                 channel = message.channel
                 print('try to check channel')
+                print(f"Channel type: {channel.type}")  # Add this line
                 if channel.type == discord.ChannelType.text:
                     print('try to check voice channel')
                     voice_channel = voice_client.channel
