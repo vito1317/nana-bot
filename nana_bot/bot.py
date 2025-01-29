@@ -448,15 +448,17 @@ def bot_run():
             )
             conn.commit()
 
-        join_date = (
-            (message.author.joined_at + timedelta(hours=8)).replace(tzinfo=None).isoformat()
-            if message.author.joined_at
-            else None
-        )
+        join_date = None
+        if isinstance(message.author, discord.Member):
+          join_date = (
+              (message.author.joined_at + timedelta(hours=8)).replace(tzinfo=None).isoformat()
+              if message.author.joined_at
+              else None
+          )
         update_user_message_count(message.author.id, user_name, join_date)
 
         await bot.process_commands(message)
-
+        
         if (
             (f"{bot_name}" in message.content)
             or (message.channel.id in TARGET_CHANNEL_ID)
