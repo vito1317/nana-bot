@@ -602,51 +602,7 @@ def bot_run():
                         return url
                     else:
                         return None
-                guild_id = message.guild.id
-                if guild_id in voice_clients:
-                    voice_client = voice_clients[guild_id]
-                    
-                    if voice_client.channel and message.author != bot.user: # check if bot is connected and not speak to self
-                        channel = message.channel
-                        print('try to check channel')
-                        print(f"Channel type: {channel.type}")  # Add this line\
-                        print(f"text channel type: {discord.ChannelType.text}")
-                        #if channel.type == "voice":
-                        print('try to check voice channel')
-                        voice_channel = voice_client.channel
-                        if voice_channel:
-                            print('try to check text channel')
-                            # Fetch the associated text channel
-                            text_channels_in_guild = message.guild.text_channels
-                            #Check if the text channel is associated with the voice channel
-                            if channel.category == voice_channel.category: #If same category, should be same voice channel
-                                print('try to generate TTS')
-                                try:
-                                    tts = gTTS(text=reply, lang='zh-tw')
-                                    fp = io.BytesIO()
-                                    tts.write_to_fp(fp)
-                                    fp.seek(0)
-                                    
-                                    # Save to a temp file
-                                    temp_file_path = f"temp_tts_{message.id}.mp3"  # Generate a unique filename
-                                    with open(temp_file_path, "wb") as temp_file:
-                                        temp_file.write(fp.read())
-                                        
-                                    
-                                    await asyncio.sleep(0.1)
-                                    # Play TTS audio
-                                    audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(temp_file_path), volume=1)
-                                    voice_client.play(audio_source)
-                                    
-                                    #Keep a check of if it is playing the voice
-                                    while voice_client.is_playing():
-                                        await asyncio.sleep(1)
-                                    
-                                    # Delete the temp file
-                                    os.remove(temp_file_path)
-                                
-                                except Exception as e:
-                                    print(f"TTS Error: {e}")
+                
                 reply_o = reply
                 search_query = extract_command(reply, "search")
                 browse_url = extract_command(reply, "browse")
@@ -871,6 +827,51 @@ def bot_run():
                         await message.reply(response.text)
                     else:
                         print("無法解析命令")
+                guild_id = message.guild.id
+                if guild_id in voice_clients:
+                    voice_client = voice_clients[guild_id]
+                    
+                    if voice_client.channel and message.author != bot.user: # check if bot is connected and not speak to self
+                        channel = message.channel
+                        print('try to check channel')
+                        print(f"Channel type: {channel.type}")  # Add this line\
+                        print(f"text channel type: {discord.ChannelType.text}")
+                        #if channel.type == "voice":
+                        print('try to check voice channel')
+                        voice_channel = voice_client.channel
+                        if voice_channel:
+                            print('try to check text channel')
+                            # Fetch the associated text channel
+                            text_channels_in_guild = message.guild.text_channels
+                            #Check if the text channel is associated with the voice channel
+                            if channel.category == voice_channel.category: #If same category, should be same voice channel
+                                print('try to generate TTS')
+                                try:
+                                    tts = gTTS(text=reply, lang='zh-tw')
+                                    fp = io.BytesIO()
+                                    tts.write_to_fp(fp)
+                                    fp.seek(0)
+                                    
+                                    # Save to a temp file
+                                    temp_file_path = f"temp_tts_{message.id}.mp3"  # Generate a unique filename
+                                    with open(temp_file_path, "wb") as temp_file:
+                                        temp_file.write(fp.read())
+                                        
+                                    
+                                    await asyncio.sleep(0.1)
+                                    # Play TTS audio
+                                    audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(temp_file_path), volume=1)
+                                    voice_client.play(audio_source)
+                                    
+                                    #Keep a check of if it is playing the voice
+                                    while voice_client.is_playing():
+                                        await asyncio.sleep(1)
+                                    
+                                    # Delete the temp file
+                                    os.remove(temp_file_path)
+                                
+                                except Exception as e:
+                                    print(f"TTS Error: {e}")
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
                 await message.reply(f"An error occurred: {e}")
