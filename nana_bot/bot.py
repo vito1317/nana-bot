@@ -836,16 +836,17 @@ def bot_run():
         if guild_id in voice_clients:
             voice_client = voice_clients[guild_id]
             
-            if voice_client.channel and message.author != bot.user: # check if bot is connected and not speak to self
+            if voice_client.channel and message.author != bot.user: 
                 channel = message.channel
-                if channel.type == discord.ChannelType.text: #check channel is text channel
-                    voice_channel = voice_client.channel #Get the voice channel
+                print('try to check channel')
+                if channel.type == discord.ChannelType.text:
+                    print('try to check voice channel')
+                    voice_channel = voice_client.channel
                     if voice_channel:
-                        # Fetch the associated text channel
+                        print('try to check text channel')
                         text_channels_in_guild = message.guild.text_channels
-                        #Check if the text channel is associated with the voice channel
-                        if channel.category == voice_channel.category: #If same category, should be same voice channel
-                            # Generate TTS
+                        if channel.category == voice_channel.category:
+                            print('try to generate TTS')
                             try:
                                 tts = gTTS(text=message.content, lang='zh-tw')
                                 fp = io.BytesIO()
