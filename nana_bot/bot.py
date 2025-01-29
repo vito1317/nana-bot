@@ -851,7 +851,7 @@ def bot_run():
                     if channel.category == voice_channel.category: #If same category, should be same voice channel
                         print('try to generate TTS')
                         try:
-                            tts = gTTS(text=response.text, lang='zh-tw')
+                            tts = gTTS(text=reply, lang='zh-tw')
                             fp = io.BytesIO()
                             tts.write_to_fp(fp)
                             fp.seek(0)
