@@ -252,14 +252,22 @@ def bot_run():
     @bot.tree.command(name='leave', description="讓機器人離開語音頻道")
     async def leave(interaction: discord.Interaction):
         """讓機器人離開語音頻道."""
-        guild_id = interaction.guild.id
-        if guild_id in voice_clients:
-            voice_client = voice_clients[guild_id]
-            await voice_client.disconnect()
-            del voice_clients[guild_id]
-            await interaction.response.send_message("已離開語音頻道。")
-        else:
-            await interaction.response.send_message("我沒有在任何語音頻道中。")
+        try:
+            guild_id = interaction.guild.id
+            if guild_id in voice_clients:
+                voice_client = voice_clients[guild_id]
+                await voice_client.disconnect()
+                del voice_clients[guild_id]
+                await interaction.response.send_message("已離開語音頻道。")
+            else:
+                await interaction.response.send_message("我沒有在任何語音頻道中。")
+        except discord.errors.HTTPException as e:
+            logging.error(f"HTTPException while handling leave command: {e}")
+            # Optionally, use interaction.followup.send here for additional messages
+            # await interaction.followup.send(f"An error occurred: {e}")
+        except Exception as e:
+            logging.error(f"An error occurred during leave command: {e}")
+            await interaction.response.send_message(f"An error occurred during leave command: {e}")
     @bot.event
     async def on_message(message):
         bot_app_id = bot.user.id
