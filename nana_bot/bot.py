@@ -2,7 +2,7 @@
 import asyncio
 import traceback
 import discord
-from discord import app_commands
+from discord import app_commands, FFmpegPCMAudio
 from discord.ext import commands, tasks
 from discord_interactions import InteractionType, InteractionResponseType
 from typing import Optional
@@ -864,7 +864,7 @@ def bot_run():
                             
                             await asyncio.sleep(0.1)
                             # Play TTS audio
-                            audio_source = discord.PCMVolumeTransformer(discord.AudioSource.from_file(temp_file_path), volume=1)
+                            audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(temp_file_path), volume=1)
                             voice_client.play(audio_source)
                             
                             #Keep a check of if it is playing the voice
