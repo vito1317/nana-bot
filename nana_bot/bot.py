@@ -228,16 +228,26 @@ def bot_run():
     @bot.tree.command(name='join', description="讓機器人加入語音頻道")
     async def join(interaction: discord.Interaction):
         """讓機器人加入語音頻道."""
-        if interaction.user.voice:
-            channel = interaction.user.voice.channel
-            try:
-                voice_client = await channel.connect()
-                voice_clients[interaction.guild.id] = voice_client
-                await interaction.response.send_message(f"已加入語音頻道: {channel.name}")
-            except Exception as e:
-                await interaction.response.send_message(f"加入語音頻道時發生錯誤: {e}")
-        else:
-            await interaction.response.send_message("您不在語音頻道中！")
+        try:
+            if interaction.user.voice:
+                channel = interaction.user.voice.channel
+                try:
+                    voice_client = await channel.connect(timeout=10)  # 加入timeout
+                    voice_clients[interaction.guild.id] = voice_client
+                    await interaction.response.send_message(f"已加入語音頻道: {channel.name}")
+                except asyncio.TimeoutError:
+                    await interaction.response.send_message(f"加入語音頻道時發生超時錯誤，請稍後再試。")
+                except Exception as e:
+                    await interaction.response.send_message(f"加入語音頻道時發生錯誤: {e}")
+            else:
+                await interaction.response.send_message("您不在語音頻道中！")
+        except discord.errors.HTTPException as e:
+            logging.error(f"HTTPException while handling join command: {e}")
+            # Optionally, use interaction.followup.send here for additional messages
+            # await interaction.followup.send(f"An error occurred: {e}")
+        except Exception as e:
+            logging.error(f"An error occurred during join command: {e}")
+            await interaction.response.send_message(f"An error occurred during join command: {e}")
 
     @bot.tree.command(name='leave', description="讓機器人離開語音頻道")
     async def leave(interaction: discord.Interaction):
@@ -368,7 +378,8 @@ def bot_run():
                     print(f"NULL content messages removed from {chat_db_name}")
 
             except sqlite3.Error as e:
-                print(f"An error occurred: {e}")
+                pass
+                #print(f"An error occurred: {e}")
         #utc8 = timezone(timedelta(hours=8))
         def get_user_points(user_id, user_name = None, join_date = None):
             conn = sqlite3.connect("./databases/" + points_db_name)
@@ -458,7 +469,7 @@ def bot_run():
         update_user_message_count(message.author.id, user_name, join_date)
 
         await bot.process_commands(message)
-        
+
         if (
             (f"{bot_name}" in message.content)
             or (message.channel.id in TARGET_CHANNEL_ID)
