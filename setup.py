@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.6.2",
+    version="5.6.2.1",
     author="Vito1317",
     author_email="service@vito95311.online",
     description="A helpful Discord bot powered by Gemini",
@@ -29,8 +29,7 @@ setuptools.setup(
         "aiohttp",
         "search-engine-tool-vito1317",
         "python-dotenv",
-        "gtts",
-        "io"
+        "gtts"
     ],
     entry_points={
         'console_scripts': [
