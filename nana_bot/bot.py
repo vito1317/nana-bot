@@ -835,17 +835,20 @@ def bot_run():
         if guild_id in voice_clients:
             voice_client = voice_clients[guild_id]
             
-            if voice_client.channel and message.author != bot.user: 
+            if voice_client.channel and message.author != bot.user: # check if bot is connected and not speak to self
                 channel = message.channel
                 print('try to check channel')
-                print(f"Channel type: {channel.type}")  # Add this line
-                if channel.type == discord.ChannelType.text:
+                print(f"Channel type: {channel.type}")  # Add this line\
+                print(f"text channel type: {discord.ChannelType.text}")
+                if channel.type == "voice":
                     print('try to check voice channel')
                     voice_channel = voice_client.channel
                     if voice_channel:
                         print('try to check text channel')
+                        # Fetch the associated text channel
                         text_channels_in_guild = message.guild.text_channels
-                        if channel.category == voice_channel.category:
+                        #Check if the text channel is associated with the voice channel
+                        if channel.category == voice_channel.category: #If same category, should be same voice channel
                             print('try to generate TTS')
                             try:
                                 tts = gTTS(text=message.content, lang='zh-tw')
@@ -873,7 +876,6 @@ def bot_run():
                             
                             except Exception as e:
                                 print(f"TTS Error: {e}")
-
 
     bot.run(discord_bot_token) 
 
