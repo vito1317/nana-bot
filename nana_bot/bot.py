@@ -874,7 +874,7 @@ def bot_run():
                                     print(f"TTS Error: {e}")
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
-                await message.reply(f"An error occurred: {e}")
+                #await message.reply(f"An error occurred: {e}")
     bot.run(discord_bot_token) 
 
 __all__ = ['bot_run', 'bot']
