@@ -58,8 +58,7 @@ send_daily_channel_id = send_daily_channel_id_list
 
 # Global dictionary to store voice clients for each guild
 voice_clients = {}
-bot = commands.Bot(command_prefix="/", intents=discord.Intents.all())
-tree = app_commands.CommandTree(bot)
+
 def bot_run():
     @tasks.loop(hours=24)
     async def send_daily_message():
@@ -226,7 +225,7 @@ def bot_run():
                     await channel.send(embed=embed)
                 break
 
-    @tree.command(name='join', description="讓機器人加入語音頻道")
+    @bot.tree.command(name='join', description="讓機器人加入語音頻道")
     async def join(interaction: discord.Interaction):
         """讓機器人加入語音頻道."""
         if interaction.user.voice:
@@ -240,7 +239,7 @@ def bot_run():
         else:
             await interaction.response.send_message("您不在語音頻道中！")
 
-    @tree.command(name='leave', description="讓機器人離開語音頻道")
+    @bot.tree.command(name='leave', description="讓機器人離開語音頻道")
     async def leave(interaction: discord.Interaction):
         """讓機器人離開語音頻道."""
         guild_id = interaction.guild.id
