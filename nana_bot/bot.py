@@ -831,11 +831,12 @@ def bot_run():
                 logging.error(f"An error occurred: {e}")
                 await message.reply(f"An error occurred: {e}")
         
-        #TTS function, Check if the message was sent in a text channel within a voice channel
+         #TTS function, Check if the message was sent in a text channel within a voice channel
         guild_id = message.guild.id
         if guild_id in voice_clients:
             voice_client = voice_clients[guild_id]
-            if voice_client.is_connected() and message.author != bot.user: # check if bot is connected and not speak to self
+            
+            if voice_client.channel and message.author != bot.user: # check if bot is connected and not speak to self
                 channel = message.channel
                 if channel.type == discord.ChannelType.text: #check channel is text channel
                     voice_channel = None
@@ -845,19 +846,30 @@ def bot_run():
                             break
                     if voice_channel and channel in voice_channel.text_channels:
                         # Generate TTS
+                        print('try to generate TTS')
                         try:
                             tts = gTTS(text=message.content, lang='zh-tw')
                             fp = io.BytesIO()
                             tts.write_to_fp(fp)
                             fp.seek(0)
                             
+                            # Save to a temp file
+                            temp_file_path = f"temp_tts_{message.id}.mp3"  # Generate a unique filename
+                            with open(temp_file_path, "wb") as temp_file:
+                                temp_file.write(fp.read())
+                                
+                            
+                            await asyncio.sleep(0.1)
                             # Play TTS audio
-                            audio_source = discord.PCMVolumeTransformer(discord.AudioSource.from_file(fp), volume=1)
+                            audio_source = discord.PCMVolumeTransformer(discord.AudioSource.from_file(temp_file_path), volume=1)
                             voice_client.play(audio_source)
                             
                             #Keep a check of if it is playing the voice
                             while voice_client.is_playing():
                                 await asyncio.sleep(1)
+                            
+                            # Delete the temp file
+                            os.remove(temp_file_path)
                         
                         except Exception as e:
                             print(f"TTS Error: {e}")
