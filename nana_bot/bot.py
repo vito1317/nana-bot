@@ -41,6 +41,9 @@ from nana_bot import (
 )
 import os
 
+# TTS related imports
+from gtts import gTTS
+import io
 
 def get_current_time_utc8():
     utc8 = timezone(timedelta(hours=8))
@@ -53,6 +56,10 @@ not_reviewed_role_id = not_reviewed_id
 model = genai.GenerativeModel(gemini_model)
 send_daily_channel_id = send_daily_channel_id_list
 
+# Global dictionary to store voice clients for each guild
+voice_clients = {}
+bot = commands.Bot(command_prefix="/", intents=discord.Intents.all())
+tree = app_commands.CommandTree(bot)
 def bot_run():
     @tasks.loop(hours=24)
     async def send_daily_message():
@@ -219,7 +226,31 @@ def bot_run():
                     await channel.send(embed=embed)
                 break
 
+    @tree.command(name='join', description="讓機器人加入語音頻道")
+    async def join(interaction: discord.Interaction):
+        """讓機器人加入語音頻道."""
+        if interaction.user.voice:
+            channel = interaction.user.voice.channel
+            try:
+                voice_client = await channel.connect()
+                voice_clients[interaction.guild.id] = voice_client
+                await interaction.response.send_message(f"已加入語音頻道: {channel.name}")
+            except Exception as e:
+                await interaction.response.send_message(f"加入語音頻道時發生錯誤: {e}")
+        else:
+            await interaction.response.send_message("您不在語音頻道中！")
 
+    @tree.command(name='leave', description="讓機器人離開語音頻道")
+    async def leave(interaction: discord.Interaction):
+        """讓機器人離開語音頻道."""
+        guild_id = interaction.guild.id
+        if guild_id in voice_clients:
+            voice_client = voice_clients[guild_id]
+            await voice_client.disconnect()
+            del voice_clients[guild_id]
+            await interaction.response.send_message("已離開語音頻道。")
+        else:
+            await interaction.response.send_message("我沒有在任何語音頻道中。")
     @bot.event
     async def on_message(message):
         bot_app_id = bot.user.id
@@ -623,7 +654,7 @@ def bot_run():
                             ["div", "h1", "h2", "h3", "h4", "h5", "h6", "p"]
                         )
                         elements_str = "".join(str(element) for element in elements)
-                        return elements_str
+                        return elements
                     else:
                         print("請求失敗！狀態碼：", response.status_code)
 
@@ -800,6 +831,39 @@ def bot_run():
             except Exception as e:
                 logging.error(f"An error occurred: {e}")
                 await message.reply(f"An error occurred: {e}")
+        
+        #TTS function, Check if the message was sent in a text channel within a voice channel
+        guild_id = message.guild.id
+        if guild_id in voice_clients:
+            voice_client = voice_clients[guild_id]
+            if voice_client.is_connected() and message.author != bot.user: # check if bot is connected and not speak to self
+                channel = message.channel
+                if channel.type == discord.ChannelType.text: #check channel is text channel
+                    voice_channel = None
+                    for v_channel in message.guild.voice_channels:
+                        if voice_client.channel == v_channel:
+                            voice_channel = v_channel
+                            break
+                    if voice_channel and channel in voice_channel.text_channels:
+                        # Generate TTS
+                        try:
+                            tts = gTTS(text=message.content, lang='zh-tw')
+                            fp = io.BytesIO()
+                            tts.write_to_fp(fp)
+                            fp.seek(0)
+                            
+                            # Play TTS audio
+                            audio_source = discord.PCMVolumeTransformer(discord.AudioSource.from_file(fp), volume=1)
+                            voice_client.play(audio_source)
+                            
+                            #Keep a check of if it is playing the voice
+                            while voice_client.is_playing():
+                                await asyncio.sleep(1)
+                        
+                        except Exception as e:
+                            print(f"TTS Error: {e}")
+
+
     bot.run(discord_bot_token) 
 
 __all__ = ['bot_run', 'bot']

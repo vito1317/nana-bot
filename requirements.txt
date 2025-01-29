@@ -7,3 +7,5 @@ aiohttp
 BeautifulSoup4
 search_engine_tool_vito1317
 python-dotenv
+gtts
+io
