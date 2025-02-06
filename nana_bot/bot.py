@@ -103,7 +103,7 @@ def bot_run():
             logger.info(f"Bot is in server: {guild.name} (ID: {guild.id})")
 
             init_db(f"analytics_server_{guild.id}.db", db_tables)
-            init_db(f"messages_chat_{guild.id}.db", {"message": db_tables["message"]})
+            init_db(f"messages_chat_{guild.id}.db", {"message": db_tables["message"]})  # 使用 db_tables
             guild = discord.Object(id=guild.id)
         bot.tree.copy_global_to(guild=guild)
         slash = await bot.tree.sync(guild=guild)
@@ -166,7 +166,7 @@ def bot_run():
                 try:
                     responses = model.generate_content(
                         [
-                           f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
+                            f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
                             f"你現在要做的事是歡迎使用者{member.mention}的加入並且引導使用者使用系統，同時也可以請你自己做一下自我介紹(以你{bot_name}的身分做自我介紹而不是請使用者做自我介紹)，同時，請不要詢問使用者想要聊聊嗎、想要聊什麼之類的話。同時也請不要回覆這則訊息。",
                             f"第二步是tag <#{newcomer_review_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，請務必引導使用者講述自己的病症與情況，而不是只傳送 <#{newcomer_review_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也並不是請你去示範，也不是請他跟你分享要聊什麼，也請不要請新人(使用者)與您分享相關訊息",
                             f"新人審核格式包誇(```{review_format}```)，example(僅為範例，請勿照抄):(你好！歡迎加入{member.guild.name}，很高興認識你！我叫{bot_name}，是你們的心理支持輔助機器人。如果你有任何情感困擾、生活問題，或是需要一點建議，都歡迎在審核後找我聊聊。我會盡力以溫暖、理解的方式傾聽，並給你專業的建議和支持。但在你跟我聊天以前，需要請你先到 <#{newcomer_review_channel_id}> 填寫以下資訊，方便我更好的為你服務！ ```{review_format}```)請記住務必傳送>> ```{review_format}```和<#{newcomer_review_channel_id}> <<",
@@ -306,6 +306,7 @@ def bot_run():
         except Exception as e:
             logger.error(f"An error occurred during leave command: {e}")
             await interaction.response.send_message(f"An error occurred during leave command: {e}")
+
     @bot.event
     async def on_message(message):
         bot_app_id = bot.user.id
@@ -321,7 +322,8 @@ def bot_run():
         points_db_name = 'points_' + str(server_id) + '.db'
         channel_id = str(message.channel.id)
 
-        def init_db(db):
+
+        def init_db(db, tables=None):  # 增加一個可選的 tables 參數
             db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db)
             logger.info(f"Database path: {db_path}")
 
@@ -337,12 +339,18 @@ def bot_run():
             try:
                 conn = sqlite3.connect(db_path)
                 c = conn.cursor()
-                c.execute(
-                    """CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)"""
-                )
-                c.execute(
-                    """CREATE TABLE IF NOT EXISTS messages (user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)"""
-                )
+
+                # 使用傳入的 tables 參數，或者預設的表結構
+                if tables:
+                    for table_name, table_schema in tables.items():
+                        c.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({table_schema})")
+                else:  # 如果沒有提供 tables 參數，則使用預設的 users 和 messages 表
+                     c.execute(
+                        """CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)"""
+                     )
+                     c.execute(
+                         """CREATE TABLE IF NOT EXISTS messages (user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)"""
+                     )
                 conn.commit()
             except sqlite3.Error as e:
                 logger.exception(f"Database error in init_db: {e}")
@@ -540,7 +548,7 @@ def bot_run():
                     conn.close()
 
         init_db(db_name)
-        init_db(chat_db_name)
+        init_db(chat_db_name, {"message": "id INTEGER PRIMARY KEY, user TEXT, content TEXT, timestamp TEXT"}) # 使用正確的表格結構
 
         db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", points_db_name)
         conn = None
@@ -581,7 +589,7 @@ def bot_run():
             c.execute(
                 """
                 INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) 
-                VALUES (?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     str(message.author.id),
@@ -967,7 +975,7 @@ def bot_run():
                                         (f"{bot_name}", content, timestamp),
                                     )
                                     conn.commit()
-                                await message.reply(responses) # 網站總結的回覆
+                                await message.reply(responses)  # 網站總結的回覆
 
                         else:
                             logger.warning("Could not parse browse command.")
