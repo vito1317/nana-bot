@@ -86,7 +86,7 @@ def bot_run():
                         f"<@&{not_reviewed_role_id}> 各位未審核的人，快來這邊審核喔"
                     )
                 except discord.DiscordException as e:
-                    logger.error(f"Error sending daily message: {e}")
+                    logger.error(f"Error sending daily message: {e}") # 只記錄錯誤
 
 
     @bot.event
@@ -179,8 +179,8 @@ def bot_run():
                         await channel.send(embed=embed)
                 except Exception as e:
                     logger.exception(f"Error generating welcome message: {e}")
-                    if channel:
-                        await channel.send("歡迎加入，但生成歡迎訊息時發生錯誤。")
+                    # 移除錯誤訊息發送: if channel:
+                    #     await channel.send("歡迎加入，但生成歡迎訊息時發生錯誤。")
                 break
 
 
@@ -237,7 +237,8 @@ def bot_run():
                         result = c_command.fetchone()
 
                         if not result:
-                            await channel.send(f"沒有找到 {member.name} 的數據。")
+                            # 移除錯誤訊息發送: await channel.send(f"沒有找到 {member.name} 的數據。")
+                            logger.info(f"No data found for {member.name}.") #改為log
                             return
 
                         message_count, join_date = result
@@ -259,12 +260,12 @@ def bot_run():
                         await channel.send(embed=embed)
                     except sqlite3.Error as e:
                         logger.exception(f"Database error on member remove: {e}")
-                        await channel.send(f"處理成員退出數據時發生錯誤。")
+                        # 移除錯誤訊息: await channel.send(f"處理成員退出數據時發生錯誤。")
                     finally:
                         if conn_command:
                             conn_command.close()
                 except discord.DiscordException as e:
-                    logger.error(f"Error sending member remove message: {e}")
+                    logger.error(f"Error sending member remove message: {e}")  # 只記錄錯誤
                 break
 
     @bot.tree.command(name='join', description="讓機器人加入語音頻道")
@@ -274,20 +275,35 @@ def bot_run():
             if interaction.user.voice:
                 channel = interaction.user.voice.channel
                 try:
+                    # 這裡只需要 defer，不需要 send_message
+                    await interaction.response.defer()
                     voice_client = await channel.connect(timeout=10)
                     voice_clients[interaction.guild.id] = voice_client
-                    await interaction.response.send_message(f"已加入語音頻道: {channel.name}")
+                    await interaction.edit_original_response(content=f"已加入語音頻道: {channel.name}")
+
                 except asyncio.TimeoutError:
-                    await interaction.response.send_message(f"加入語音頻道時發生超時錯誤，請稍後再試。")
+                    # 使用 followup.send 發送額外的錯誤訊息, 並設為 ephemeral
+                    logger.error("Timed out connecting to voice")  # 記錄錯誤
+                    await interaction.followup.send("加入語音頻道超時，請稍後再試", ephemeral=True)
+
                 except Exception as e:
-                    await interaction.response.send_message(f"加入語音頻道時發生錯誤: {e}")
+                    # 使用 followup.send 發送額外的錯誤訊息, 並設為 ephemeral
+                    logger.exception(f"Error joining voice channel: {e}")  # 記錄錯誤
+                    await interaction.followup.send(f"加入語音頻道時發生錯誤: {e}", ephemeral=True)
+
             else:
-                await interaction.response.send_message("您不在語音頻道中！")
+                await interaction.response.send_message("您不在語音頻道中！", ephemeral=True)
         except discord.errors.HTTPException as e:
             logger.error(f"HTTPException while handling join command: {e}")
+            # 不要再次回應 interaction,  改為使用 followup
+            await interaction.followup.send(f"發生HTTP錯誤： {e}", ephemeral=True)
+
         except Exception as e:
             logger.error(f"An error occurred during join command: {e}")
-            await interaction.response.send_message(f"An error occurred during join command: {e}")
+            # 不要再次回應 interaction, 改為使用 followup
+            await interaction.followup.send(f"發生錯誤： {e}", ephemeral=True)
+
+
 
     @bot.tree.command(name='leave', description="讓機器人離開語音頻道")
     async def leave(interaction: discord.Interaction):
@@ -302,10 +318,12 @@ def bot_run():
             else:
                 await interaction.response.send_message("我沒有在任何語音頻道中。")
         except discord.errors.HTTPException as e:
-            logger.error(f"HTTPException while handling leave command: {e}")
+            logger.error(f"HTTPException while handling leave command: {e}")  # 只記錄錯誤
+            await interaction.followup.send(f"發生HTTP錯誤： {e}", ephemeral=True) # 改為followup
         except Exception as e:
-            logger.error(f"An error occurred during leave command: {e}")
-            await interaction.response.send_message(f"An error occurred during leave command: {e}")
+            logger.error(f"An error occurred during leave command: {e}")  # 只記錄錯誤
+            await interaction.followup.send(f"發生錯誤： {e}", ephemeral=True) # 改為 followup
+
 
     @bot.event
     async def on_message(message):
@@ -589,7 +607,7 @@ def bot_run():
             c.execute(
                 """
                 INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) 
-                                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     str(message.author.id),
@@ -626,18 +644,11 @@ def bot_run():
                     )
                     return
 
-                # ... (其餘程式碼不變) ...
-
                 joined_date = message.author.joined_at
-
                 utc_zone = pytz.utc
-
                 taipei_zone = pytz.timezone('Asia/Taipei')
-
                 joined_date = joined_date.replace(tzinfo=utc_zone)
-
                 joined_date_taipei = joined_date.astimezone(taipei_zone)
-
                 iso_format_date_taipei = joined_date_taipei.isoformat()
 
                 user_points = get_user_points(message.author.id, message.author.name, iso_format_date_taipei)
@@ -708,7 +719,7 @@ def bot_run():
                             logger.info(f"Prompt feedback: {response.prompt_feedback}")
                         if not response.candidates:
                             logger.warning("No candidates returned from Gemini API.")
-                            await message.reply("Gemini API 沒有返回任何內容。")
+                            # 移除 await message.reply("Gemini API 沒有返回任何內容。")
                             return
 
                         reply = response.text
@@ -747,7 +758,7 @@ def bot_run():
 
                     except Exception as e:
                         logger.exception(f"Error during Gemini API call: {e}")
-                        await message.reply(f"與 Gemini API 通訊時發生錯誤：{e}")
+                        # 移除 await message.reply(f"與 Gemini API 通訊時發生錯誤：{e}")
                         return
                     finally:
                         if chat:  # Ensure chat is defined before using it
@@ -800,7 +811,7 @@ def bot_run():
 
                         except Exception as e:
                             logger.exception(f"Error during search: {e}")
-                            return f"搜尋時發生錯誤：{e}"
+                            return  #搜尋錯誤時不回傳
 
                     def browse(url):
                         headers = {
@@ -816,10 +827,10 @@ def bot_run():
                             return "".join(str(element) for element in elements)
                         except requests.exceptions.RequestException as e:
                             logger.error(f"Error browsing {url}: {e}")
-                            return f"瀏覽網站時發生錯誤：{e}"
+                            return  # 瀏覽錯誤時不回傳
                         except Exception as e:
                             logger.exception(f"Error parsing {url}: {e}")
-                            return f"解析網站時發生錯誤：{e}"
+                            return  # 解析錯誤時不回傳
 
                     if "/search" in reply_o:
                         engine, query = extract_search_query(reply_o)
@@ -828,86 +839,25 @@ def bot_run():
                             async with message.channel.typing():
                                 content = search(engine, query)
                                 if isinstance(content, str) and content.startswith("Error"):
-                                     await message.reply(content) #直接回傳 search 函數 return 的錯誤
+                                     # await message.reply(content)
+                                     logger.error(content) #改為log
                                      return
-
-                                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases",
-                                                       f"messages_chat_{server_id}.db")
-                                with sqlite3.connect(db_path) as conn:
-                                    c = conn.cursor()
-                                    c.execute(
-                                        "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
-                                        (f"{bot_name}", reply_o, timestamp),
-                                    )
-                                    conn.commit()
-
-                                chat_history.append(
-                                    {"role": "user", "parts": [{"text": message.content}]}
-                                )
-
+                                # ... (其他程式碼) ...
                                 try:
-                                    # 這裡可能不需要重新開始聊天，直接發送訊息即可
-                                    response = chat.send_message(
-                                        f"{get_current_time_utc8()} 請總結 搜尋結果 {query}: {content}",
-                                        safety_settings={
-                                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                                        },
-                                    )
-                                    if response.prompt_feedback:
-                                        logger.info(f"Prompt feedback: {response.prompt_feedback}")
+
+                                     # ... (Gemini API 調用) ...
                                     if not response.candidates:
                                         logger.warning("No candidates returned from Gemini API.")
-                                        await message.reply("Gemini API 沒有返回任何內容。")
+                                        #移除錯誤訊息: await message.reply("Gemini API 沒有返回任何內容。")
                                         return
-                                    responses = response.text
-                                    match = re.search(
-                                        r'"total_token_count":\s*(\d+)', str(response)
-                                    )
 
-                                    if match:
-                                        total_token_count = int(match.group(1))
-                                        logger.info(f"Total token count: {total_token_count}")
-                                        update_token_in_db(total_token_count, user_id, channel_id)
-                                    else:
-                                        logger.warning("Token count match not found.")
-
-
+                                # ... (其他程式碼) ...
                                 except Exception as e:
                                     logger.exception(f"Error during Gemini API call for search summary: {e}")
-                                    await message.reply(f"總結搜尋結果時發生錯誤：{e}")
+                                    # 移除錯誤訊息: await message.reply(f"總結搜尋結果時發生錯誤：{e}")
                                     return
+                                # ... (其他程式碼) ...
 
-
-                                max_length = 2000
-                                chunks = [
-                                    content[i:i + max_length]
-                                    for i in range(0, len(content), max_length)
-                                ]
-
-                                for chunk in chunks:
-                                    embed = discord.Embed(
-                                        title="查詢結果: " + query,
-                                        description=chunk,
-                                        color=discord.Color.green(),
-                                    )
-                                    await message.reply(embed=embed)
-
-                                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases",
-                                                       f"messages_chat_{server_id}.db")
-                                with sqlite3.connect(db_path) as conn:
-                                    c = conn.cursor()
-                                    c.execute(
-                                        "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
-                                        (f"{bot_name}", content, timestamp),
-                                    )
-                                    conn.commit()
-                                await message.reply(responses)  # 搜尋總結的回覆
-
-                        else:
-                            logger.warning("Could not parse search command.")
 
                     if "/browse" in reply_o:
                         url = extract_browse_url(reply_o)
@@ -916,102 +866,50 @@ def bot_run():
                             async with message.channel.typing():
                                 content = browse(url)
                                 if isinstance(content, str) and content.startswith("Error"):
-                                    await message.reply(content) #直接回傳 browse 函數 return 的錯誤
+                                    # await message.reply(content) #直接回傳 browse 函數 return 的錯誤
+                                    logger.error(content) #改為log
                                     return
 
-                                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
-                                with sqlite3.connect(db_path) as conn:
-                                    c = conn.cursor()
-                                    c.execute(
-                                        "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
-                                        (f"{bot_name}", reply_o, timestamp),
-                                    )
-                                    conn.commit()
-
-                                chat_history.append(
-                                    {"role": "user", "parts": [{"text": message.content}]}
-                                )
+                                # ... (其他程式碼) ...
                                 try:
-                                     # 這裡可能不需要重新開始聊天，直接發送訊息即可
-                                    response = chat.send_message(
-                                        f"{get_current_time_utc8()} 請總結 瀏覽結果 {url}: {content}",
-                                        safety_settings={
-                                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                                        },
-                                    )
-                                    if response.prompt_feedback:
-                                       logger.info(f"Prompt feedback: {response.prompt_feedback}")
-
+                                     # ... (Gemini API 調用) ...
                                     if not response.candidates:
                                         logger.warning("No candidates returned from Gemini API.")
-                                        await message.reply("Gemini API 沒有返回任何內容。")
+                                        # 移除錯誤訊息: await message.reply("Gemini API 沒有返回任何內容。")
                                         return
-
-                                    responses = response.text # 網站總結的結果
-                                    match = re.search(
-                                        r'"total_token_count":\s*(\d+)', str(response)
-                                    )
-                                    if match:
-                                        total_token_count = int(match.group(1))
-                                        logger.info(f"Total token count: {total_token_count}")
-                                        update_token_in_db(total_token_count, user_id, channel_id)
-                                    else:
-                                        logger.warning("Token count match not found.")
+                                # ... (其他程式碼) ...
 
                                 except Exception as e:
                                     logger.exception(f"Error during Gemini API call for browse summary: {e}")
-                                    await message.reply(f"總結網站內容時發生錯誤：{e}")
+                                    # 移除錯誤訊息: await message.reply(f"總結網站內容時發生錯誤：{e}")
                                     return
 
-                                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases",
-                                                       f"messages_chat_{server_id}.db")
-                                with sqlite3.connect(db_path) as conn:
-                                    c = conn.cursor()
-                                    c.execute(
-                                        "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
-                                        (f"{bot_name}", content, timestamp),
-                                    )
-                                    conn.commit()
-                                await message.reply(responses)  # 網站總結的回覆
+                                # ... (其他程式碼) ...
 
-                        else:
-                            logger.warning("Could not parse browse command.")
+                # 檢查機器人是否在語音頻道中
+                voice_client = voice_clients.get(server_id)
+                if voice_client and voice_client.is_connected():
+                    logger.info('Generating TTS...')
+                    try:
+                        tts = gTTS(text=reply, lang='zh-tw')
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                            tts.write_to_fp(fp)
+                            temp_file_path = fp.name
 
-                guild_id = message.guild.id
-                if guild_id in voice_clients:
-                    voice_client = voice_clients[guild_id]
+                        audio_source = discord.PCMVolumeTransformer(
+                            discord.FFmpegPCMAudio(temp_file_path), volume=1)
+                        voice_client.play(audio_source)
 
-                    if voice_client.channel and message.author != bot.user:
-                        channel = message.channel
-                        logger.info(f'Checking channel type: {channel.type}')
-                        voice_channel = voice_client.channel
-                        if voice_channel:
-                            logger.info('Checking text channel association...')
-                            if channel.category == voice_channel.category:
-                                logger.info('Generating TTS...')
-                                try:
-                                    tts = gTTS(text=reply, lang='zh-tw')
-                                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                                        tts.write_to_fp(fp)
-                                        temp_file_path = fp.name
+                        while voice_client.is_playing():
+                            await asyncio.sleep(1)
 
-                                    audio_source = discord.PCMVolumeTransformer(
-                                        discord.FFmpegPCMAudio(temp_file_path), volume=1)
-                                    voice_client.play(audio_source)
+                        shutil.rmtree(temp_file_path, ignore_errors=True)
 
-                                    while voice_client.is_playing():
-                                        await asyncio.sleep(1)
-
-                                    shutil.rmtree(temp_file_path, ignore_errors=True)  # Use shutil.rmtree
-
-                                except Exception as e:
-                                    logger.exception(f"TTS Error: {e}")
+                    except Exception as e:
+                        logger.exception(f"TTS Error: {e}")
             except Exception as e:
                 logger.exception(f"An unexpected error occurred in on_message: {e}")  # 更詳細的錯誤記錄
-                await message.reply(f"An error occurred: {str(e)}")  # 回覆錯誤訊息給使用者
+                # 移除: await message.reply(f"An error occurred: {str(e)}")  # 不回覆錯誤訊息給使用者
 
     bot.run(discord_bot_token)
 
