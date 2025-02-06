@@ -40,10 +40,14 @@ from nana_bot import (
     default_points
 )
 import os
+import tempfile  # Import tempfile
+import shutil    # Import shutil
 
-# TTS related imports
-from gtts import gTTS
-import io
+# 設定日誌等級
+logging.basicConfig(level=logging.INFO,  # 設置日誌等級為 INFO
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 
 def get_current_time_utc8():
     utc8 = timezone(timedelta(hours=8))
@@ -121,9 +125,8 @@ def bot_run():
                 if channel:
                     role = member.guild.get_role(role_id)
 
-                    conn_user_join = sqlite3.connect(
-                        f"./databases/analytics_server_{server_id}.db"
-                    )
+                    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"analytics_server_{server_id}.db")
+                    conn_user_join = sqlite3.connect(db_path)
                     c_user_join = conn_user_join.cursor()
                     c_user_join.execute(
                         "INSERT OR IGNORE INTO users (user_id, message_count, join_date) VALUES (?, ?, ?)",
@@ -154,7 +157,7 @@ def bot_run():
 
     @bot.event
     async def on_member_remove(member):
-        logging.info(member)
+        logger.info(member)
         server_id = member.guild.id
         print(f"Member left in server ID: {server_id}")
 
@@ -179,10 +182,8 @@ def bot_run():
                         )
 
                     await channel.send(embed=embed)
-
-                    conn_command = sqlite3.connect(
-                        f"./databases/analytics_server_{server_id}.db"
-                    )
+                    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"analytics_server_{server_id}.db")
+                    conn_command = sqlite3.connect(db_path)
                     c_command = conn_command.cursor()
                     c_command.execute(
                         """
@@ -201,7 +202,7 @@ def bot_run():
                     result = c_command.fetchone()
                     conn_command.close()
 
-                    logging.info(result)
+                    logger.info(result)
                     if not result:
                         await channel.send(f"沒有找到 {member.name} 的數據。")
                         return
@@ -242,11 +243,11 @@ def bot_run():
             else:
                 await interaction.response.send_message("您不在語音頻道中！")
         except discord.errors.HTTPException as e:
-            logging.error(f"HTTPException while handling join command: {e}")
+            logger.error(f"HTTPException while handling join command: {e}")
             # Optionally, use interaction.followup.send here for additional messages
             # await interaction.followup.send(f"An error occurred: {e}")
         except Exception as e:
-            logging.error(f"An error occurred during join command: {e}")
+            logger.error(f"An error occurred during join command: {e}")
             await interaction.response.send_message(f"An error occurred during join command: {e}")
 
     @bot.tree.command(name='leave', description="讓機器人離開語音頻道")
@@ -262,11 +263,11 @@ def bot_run():
             else:
                 await interaction.response.send_message("我沒有在任何語音頻道中。")
         except discord.errors.HTTPException as e:
-            logging.error(f"HTTPException while handling leave command: {e}")
+            logger.error(f"HTTPException while handling leave command: {e}")
             # Optionally, use interaction.followup.send here for additional messages
             # await interaction.followup.send(f"An error occurred: {e}")
         except Exception as e:
-            logging.error(f"An error occurred during leave command: {e}")
+            logger.error(f"An error occurred during leave command: {e}")
             await interaction.response.send_message(f"An error occurred during leave command: {e}")
     @bot.event
     async def on_message(message):
@@ -284,7 +285,8 @@ def bot_run():
         channel_id = str(message.channel.id)
 
         def init_db(db):
-            conn = sqlite3.connect("./databases/" + db)
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db)
+            conn = sqlite3.connect(db_path)
             c = conn.cursor()
             c.execute(
                 """CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)"""
@@ -296,7 +298,8 @@ def bot_run():
             conn.close()
 
         def update_user_message_count(user_id, user_name, join_date):
-            with sqlite3.connect("./databases/" + db_name) as conn:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db_name)
+            with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id,))
                 result = c.fetchone()
@@ -316,7 +319,8 @@ def bot_run():
             if not total_token_count:
                 print("No total_token_count provided.")
                 return
-            with sqlite3.connect("./databases/" + db_name) as conn:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db_name)
+            with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute(
                     """
@@ -343,7 +347,8 @@ def bot_run():
 
 
         def store_message(user, content, timestamp):
-            with sqlite3.connect("./databases/" + chat_db_name) as conn:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", chat_db_name)
+            with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute(
                     "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -355,7 +360,8 @@ def bot_run():
                 conn.commit()
 
         def get_chat_history():
-            with sqlite3.connect("./databases/" + chat_db_name) as conn:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", chat_db_name)
+            with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute(
                     "SELECT user, content, timestamp FROM message ORDER BY id DESC LIMIT 60"
@@ -364,7 +370,8 @@ def bot_run():
             return rows
 
         def delete_upper_limit():
-            with sqlite3.connect("./databases/" + f"{chat_db_name}") as conn:
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", chat_db_name)
+            with sqlite3.connect(db_path) as conn:
                 c = conn.cursor()
                 c.execute(
                     "DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)"
@@ -378,8 +385,9 @@ def bot_run():
 
         def remove_null_messages():
             """Removes rows from the 'message' table where the 'content' column is NULL."""
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", chat_db_name)
             try:
-                with sqlite3.connect("./databases/" + chat_db_name) as conn:
+                with sqlite3.connect(db_path) as conn:
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM message WHERE content IS NULL")
                     conn.commit()
@@ -390,7 +398,8 @@ def bot_run():
                 #print(f"An error occurred: {e}")
         #utc8 = timezone(timedelta(hours=8))
         def get_user_points(user_id, user_name = None, join_date = None):
-            conn = sqlite3.connect("./databases/" + points_db_name)
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", points_db_name)
+            conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
             result = cursor.fetchone()
@@ -410,7 +419,8 @@ def bot_run():
             return result[0] if result else 0
 
         def deduct_points(user_id, points_to_deduct):
-            conn = sqlite3.connect("./databases/" + points_db_name)
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", points_db_name)
+            conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             current_points = get_user_points(user_id)
             new_points = max(0, current_points - points_to_deduct)
@@ -423,8 +433,9 @@ def bot_run():
             conn.close()
             return new_points
         init_db(db_name)
-        init_db(chat_db_name)  
-        conn = sqlite3.connect("./databases/" + points_db_name)
+        init_db(chat_db_name)
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", points_db_name)
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -448,9 +459,8 @@ def bot_run():
         conn.close()
 
 
-        with sqlite3.connect(
-            "./databases/" + db_name
-        ) as conn: 
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db_name)
+        with sqlite3.connect(db_path) as conn: 
             c = conn.cursor()
             c.execute(
                 """
@@ -569,9 +579,8 @@ def bot_run():
                                 HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
                             },
                         )
-                        with sqlite3.connect(
-                            "./databases/" + f"messages_chat_{server_id}.db"
-                        ) as conn:
+                        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
+                        with sqlite3.connect(db_path) as conn:
                             c = conn.cursor()
                             c.execute(
                                 "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -588,10 +597,9 @@ def bot_run():
                             update_token_in_db(total_token_count, user_id, channel_id)
                         else:
                             print("Match not found.")
-                        logging.info("API response: %s", reply)
-                        with sqlite3.connect(
-                            "./databases/" + f"messages_chat_{server_id}.db"
-                        ) as conn:
+                        logger.info("API response: %s", reply)
+                        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
+                        with sqlite3.connect(db_path) as conn:
                             c = conn.cursor()
                             c.execute(
                                 "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -602,7 +610,7 @@ def bot_run():
                         if len(reply) > 2000:
                             reply = reply[:1997] + "..."
                     except Exception as e:  # Catch potential API errors
-                        logging.exception(f"Error during Gemini API call: {e}")
+                        logger.exception(f"Error during Gemini API call: {e}")
                         await message.reply(f"與 Gemini API 通訊時發生錯誤。請稍後再試。")
                         traceback.print_exc()
                         return
@@ -667,16 +675,23 @@ def bot_run():
                     headers = {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
                     }
-                    response = requests.get(url, headers=headers)
-                    if response.status_code == 200:
+                    try:
+                        response = requests.get(url, headers=headers, timeout=10) # 增加 timeout 參數
+                        response.raise_for_status()  # 如果狀態碼不是 200，拋出異常
+
                         soup = BeautifulSoup(response.text, "html.parser")
                         elements = soup.find_all(
                             ["div", "h1", "h2", "h3", "h4", "h5", "h6", "p"]
                         )
-                        elements_str = "".join(str(element) for element in elements)
                         return elements
-                    else:
-                        print("請求失敗！狀態碼：", response.status_code)
+
+                    except requests.exceptions.RequestException as e:
+                        logger.error(f"Error browsing {url}: {e}")  # 記錄詳細的 requests 異常
+                        return f"瀏覽網站時發生錯誤：{e}"
+                    except Exception as e:
+                        logger.error(f"Error parsing {url}: {e}")
+                        return f"解析網站時發生錯誤：{e}"
+
 
                 if "/search" in reply_o:
                     engine, query = extract_search_query(reply_o)
@@ -685,9 +700,8 @@ def bot_run():
                         print(f"搜尋內容: {query}")
                         async with message.channel.typing():
                             content = search(engine, query)
-                            with sqlite3.connect(
-                                "./databases/" + f"messages_chat_{server_id}.db"
-                            ) as conn:
+                            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
+                            with sqlite3.connect(db_path) as conn:
                                 c = conn.cursor()
                                 c.execute(
                                     "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -748,8 +762,8 @@ def bot_run():
                                     color=discord.Color.green(),
                                 )
                                 await message.reply(embed=embed)
-                            with sqlite3.connect(
-                                "./databases/" + f"messages_chat_{server_id}.db") as conn:
+                            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
+                            with sqlite3.connect(db_path) as conn:
                                 c = conn.cursor()
                                 c.execute(
                                     "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -770,9 +784,8 @@ def bot_run():
                         reply_o = reply_o.replace("`", "")
                         async with message.channel.typing():
                             content = browse(url)
-                            with sqlite3.connect(
-                                "./databases/" + f"messages_chat_{server_id}.db"
-                            ) as conn:
+                            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
+                            with sqlite3.connect(db_path) as conn:
                                 c = conn.cursor()
                                 c.execute(
                                     "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -832,9 +845,8 @@ def bot_run():
                                                     color=discord.Color.green())
                                 await message.reply(embed=embed)
                             """
-                            with sqlite3.connect(
-                                "./databases/" + f"messages_chat_{server_id}.db"
-                            ) as conn:
+                            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", f"messages_chat_{server_id}.db")
+                            with sqlite3.connect(db_path) as conn:
                                 c = conn.cursor()
                                 c.execute(
                                     "INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
@@ -869,34 +881,26 @@ def bot_run():
                                 print('try to generate TTS')
                                 try:
                                     tts = gTTS(text=reply, lang='zh-tw')
-                                    fp = io.BytesIO()
-                                    tts.write_to_fp(fp)
-                                    fp.seek(0)
-                                    
-                                    # Save to a temp file
-                                    temp_file_path = f"temp_tts_{message.id}.mp3"  # Generate a unique filename
-                                    with open(temp_file_path, "wb") as temp_file:
-                                        temp_file.write(fp.read())
-                                        
-                                    
-                                    await asyncio.sleep(0.1)
+                                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                                        tts.write_to_fp(fp)
+                                        temp_file_path = fp.name  # 取得臨時檔案路徑
+
                                     # Play TTS audio
                                     audio_source = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(temp_file_path), volume=1)
                                     voice_client.play(audio_source)
-                                    
-                                    #Keep a check of if it is playing the voice
+
+                                    # Keep a check of if it is playing
                                     while voice_client.is_playing():
                                         await asyncio.sleep(1)
                                     
-                                    # Delete the temp file
-                                    os.remove(temp_file_path)
+                                    # Delete the temp file (shutil is safer for cross-platform)
+                                    shutil.rmtree(temp_file_path, ignore_errors=True)
                                 
                                 except Exception as e:
                                     print(f"TTS Error: {e}")
             except Exception as e:
-                pass
-                #logging.error(f"An error occurred: {e}")
-                #await message.reply(f"An error occurred: {e}")
+                logger.exception(f"An error occurred: {e}")  # 更詳細的錯誤記錄
+                await message.reply(f"An error occurred: {e}") #回覆錯誤訊息給使用者
     bot.run(discord_bot_token) 
 
 __all__ = ['bot_run', 'bot']
