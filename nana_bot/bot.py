@@ -323,6 +323,16 @@ def bot_run():
 
         def init_db(db):
             db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db)
+            logger.info(f"Database path: {db_path}")
+
+            # 創建目錄（如果不存在）
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+            # 檢查檔案是否存在且大小 > 0
+            if os.path.exists(db_path) and os.path.getsize(db_path) == 0:
+                logger.warning(f"Database file {db_path} exists but is empty. Deleting...")
+                os.remove(db_path)  # 刪除空檔案
+
             conn = None
             try:
                 conn = sqlite3.connect(db_path)
