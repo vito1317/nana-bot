@@ -16,7 +16,7 @@ import logging
 @app_commands.choices(analysis_type=[
     app_commands.Choice(name="本日數據", value="daily"),
     app_commands.Choice(name="本週數據", value="weekly"),
-    app_commands.Choice(name="本月數據", value="monthly"),  # 新增每月數據選項
+    app_commands.Choice(name="本月數據", value="monthly"),
     app_commands.Choice(name="人口增加數據", value="population"),
     app_commands.Choice(name="審核數據", value="reviews"),
     app_commands.Choice(name="說話次數分析", value="message_ranking"),
@@ -24,14 +24,17 @@ import logging
 ])
 async def analytics(interaction: discord.Interaction, analysis_type: str, channel: discord.TextChannel = None, member: discord.Member = None):
     db_name = 'analytics_server_' + str(interaction.guild.id) + '.db'
-    await interaction.response.defer()
+    # 立即發送一個臨時回覆，避免3秒超時
+    await interaction.response.send_message("正在分析數據，請稍候...", ephemeral=True)
 
     conn = sqlite3.connect("./databases/"+db_name)
     cursor = conn.cursor()
+    # ... (其餘代碼不變，除了後續的 interaction.followup.send 改為 interaction.edit_original_response) ...
 
     def get_database_connection():
         return sqlite3.connect("./databases/"+db_name)
 
+    # 確保所有表格都存在 (這些創建表格的程式碼只需執行一次，所以放在條件判斷之外)
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY,
@@ -77,6 +80,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
     conn.commit()
 
 
+    # --- 輔助函數 ---
     def get_daily_active_users():
         with get_database_connection() as conn:
             cursor = conn.cursor()
@@ -96,8 +100,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             WHERE DATE(join_date) >= DATE('now', '-7 days')
             ''')
             return cursor.fetchone()[0]
-    
-    def get_monthly_active_users(): 
+    def get_monthly_active_users():  # 新增每月活躍用戶函數
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -127,7 +130,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             ''')
             return cursor.fetchone()[0]
 
-    def get_monthly_reviews():  
+    def get_monthly_reviews():  # 新增每月審核數函數
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -161,7 +164,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             ''')
             return cursor.fetchall()
     
-    def get_monthly_channel_message_count(): 
+    def get_monthly_channel_message_count(): #新增每月頻道訊息技術
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -197,7 +200,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             ''')
             return cursor.fetchall()
     
-    def get_monthly_message_ranking():  
+    def get_monthly_message_ranking():  #新增每月訊息排名
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -290,7 +293,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             message_content = "請選擇有效的分析類型（例如：`daily`, `weekly`, `monthly`, `token`）。"
 
         embed = discord.Embed(title="頻道分析", description=message_content)
-        await interaction.followup.send(embed=embed)
+        await interaction.edit_original_response(embed=embed)
 
 
     elif member:  # 用戶數據
@@ -299,7 +302,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
         result = c_command.fetchone()
 
         if not result:
-            await interaction.followup.send(f'沒有找到 {member.name} 的數據。')
+            await interaction.edit_original_response(content=f'沒有找到 {member.name} 的數據。')
             return
 
         message_count, join_date = result
@@ -318,7 +321,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             embed = discord.Embed(title="用戶分析",
                               description=f'用戶: {member.name}\n'f'加入時間: {join_date.strftime("%Y-%m-%d %H:%M:%S")}\n'f'說話次數: {message_count}\n'f'平均每日說話次數: {avg_messages_per_day:.2f}\n'f'累計token: {token}\n'f'預估累計費用:  {round((token / 100000) + (token / 1000000 * 0.625), 3)}美元')
 
-        await interaction.followup.send(embed=embed)
+        await interaction.edit_original_response(embed=embed)
         c_command.close()
 
     else:  # 伺服器數據
@@ -412,7 +415,12 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
         embed = discord.Embed(title="伺服器分析", description=message_content)
         descriptions = [embed.description[i:i + 4096] for i in range(0, len(embed.description), 4096)]
 
-        for desc in descriptions:
-            new_embed = discord.Embed(description=desc)
-            await interaction.followup.send(embed=new_embed)
+        # 只需發送一次，Discord 會自動處理多個 embed
+        if descriptions:
+             await interaction.edit_original_response(embed=discord.Embed(description=descriptions[0]))
+             #如果有多個embed, 用followup發送剩下的
+             for desc in descriptions[1:]:
+                new_embed = discord.Embed(description=desc)
+                await interaction.followup.send(embed=new_embed)
+
     conn.close()
