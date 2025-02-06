@@ -24,17 +24,20 @@ import logging
 ])
 async def analytics(interaction: discord.Interaction, analysis_type: str, channel: discord.TextChannel = None, member: discord.Member = None):
     db_name = 'analytics_server_' + str(interaction.guild.id) + '.db'
-    # 立即發送一個臨時回覆，避免3秒超時
-    await interaction.response.send_message("正在分析數據，請稍候...", ephemeral=True)
+    # 快速發送初始訊息（對所有人可見）
+    await interaction.response.send_message("正在分析數據，請稍候...")
+    # 立即 defer，延長處理時間
+    await interaction.followup.defer()
+
 
     conn = sqlite3.connect("./databases/"+db_name)
     cursor = conn.cursor()
-    # ... (其餘代碼不變，除了後續的 interaction.followup.send 改為 interaction.edit_original_response) ...
+
 
     def get_database_connection():
         return sqlite3.connect("./databases/"+db_name)
 
-    # 確保所有表格都存在 (這些創建表格的程式碼只需執行一次，所以放在條件判斷之外)
+    # 確保所有表格都存在
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY,
@@ -100,7 +103,8 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             WHERE DATE(join_date) >= DATE('now', '-7 days')
             ''')
             return cursor.fetchone()[0]
-    def get_monthly_active_users():  # 新增每月活躍用戶函數
+
+    def get_monthly_active_users():
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -130,7 +134,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             ''')
             return cursor.fetchone()[0]
 
-    def get_monthly_reviews():  # 新增每月審核數函數
+    def get_monthly_reviews():
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -164,7 +168,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             ''')
             return cursor.fetchall()
     
-    def get_monthly_channel_message_count(): #新增每月頻道訊息技術
+    def get_monthly_channel_message_count():
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
@@ -200,7 +204,7 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             ''')
             return cursor.fetchall()
     
-    def get_monthly_message_ranking():  #新增每月訊息排名
+    def get_monthly_message_ranking():
         with get_database_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
