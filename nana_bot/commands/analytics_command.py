@@ -24,9 +24,8 @@ import logging
 ])
 async def analytics(interaction: discord.Interaction, analysis_type: str, channel: discord.TextChannel = None, member: discord.Member = None):
     db_name = 'analytics_server_' + str(interaction.guild.id) + '.db'
-    # 快速發送初始訊息（對所有人可見）然後立即 defer
-    await interaction.response.send_message("正在分析數據，請稍候...")
-    await interaction.response.defer()  # 正確的 defer
+    # 直接 defer
+    await interaction.response.defer()
 
 
     conn = sqlite3.connect("./databases/"+db_name)
