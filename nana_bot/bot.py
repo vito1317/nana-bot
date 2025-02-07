@@ -42,6 +42,7 @@ from nana_bot import (
 import os
 import tempfile  # Import tempfile
 import shutil    # Import shutil
+from gtts import gTTS 
 
 # 設定日誌等級
 logging.basicConfig(level=logging.INFO,  # 或 DEBUG 以獲得更詳細的日誌
