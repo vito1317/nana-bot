@@ -547,7 +547,7 @@ def bot_run():
 
 
         def deduct_points(user_id, points_to_deduct):
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", points_db_name)
+            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"databases", points_db_name)
             conn = None
             try:
                 conn = sqlite3.connect(db_path)
@@ -952,7 +952,7 @@ def bot_run():
                                         break
                                 if not found_voice: #英文也沒有
                                     engine.setProperty('voice', voices[0].id) #選第一個
-                            engine.setProperty('rate', 250)  # 設定語速
+                            engine.setProperty('rate', 100)  # 設定語速
 
                             engine.save_to_file(reply, temp_file_path)
                             engine.runAndWait()
@@ -962,11 +962,11 @@ def bot_run():
                                 discord.FFmpegPCMAudio(temp_file_path), volume=1)
                             voice_client.play(audio_source)
 
-
                             while voice_client.is_playing():
                                 await asyncio.sleep(1)
 
-                            shutil.rmtree(temp_file_path, ignore_errors=True)
+                            shutil.rmtree(temp_file_path, ignore_errors=True)  # Use shutil.rmtree
+
                         except Exception as e:
                             logger.exception(f"TTS Error: {e}")
             except Exception as e:
