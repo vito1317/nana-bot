@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.6.3",
+    version="5.6.4.1",
     license="MIT",
     author="Vito1317",
     author_email="service@vito95311.online",
@@ -30,7 +30,8 @@ setuptools.setup(
         "aiohttp",
         "search-engine-tool-vito1317",
         "python-dotenv",
-        "gtts"
+        "gtts",
+        "pyttsx3"
     ],
     entry_points={
         'console_scripts': [
