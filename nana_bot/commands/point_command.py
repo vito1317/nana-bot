@@ -169,17 +169,22 @@ async def check_points(interaction: discord.Interaction, member: discord.Member)
         
         if transactions:
             transaction_text = ""
-            for points, reason, timestamp in transactions:
-              timestamp_utc = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
-              timestamp_utc8 = timestamp_utc.replace(tzinfo=timezone.utc).astimezone(utc8)
-              timestamp_str = timestamp_utc8.strftime('%Y-%m-%d %H:%M:%S')
-              transaction_text += f"```{timestamp_str} | {'+' if points > 0 else ''}{points} | {reason}```\n"
+            # 只顯示最近 10 筆交易記錄
+            for points, reason, timestamp in transactions[:10]:
+                timestamp_utc = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                timestamp_utc8 = timestamp_utc.replace(tzinfo=timezone.utc).astimezone(utc8)
+                timestamp_str = timestamp_utc8.strftime('%Y-%m-%d %H:%M:%S')
+                transaction_text += f"```{timestamp_str} | {'+' if points > 0 else ''}{points} | {reason}```\n"
 
+            # 增加一個提示，告訴使用者還有更多記錄
+            if len(transactions) > 10:
+                transaction_text += "...\n(僅顯示最近 10 筆交易記錄)"
 
             embed.add_field(name="點數紀錄", value=transaction_text, inline=False)
 
         await interaction.followup.send(embed=embed)
     else:
+        # ... (其餘程式碼不變) ...
         joined_date = member.joined_at
 
         utc_zone = pytz.utc
