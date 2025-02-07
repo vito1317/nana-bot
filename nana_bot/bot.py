@@ -661,6 +661,7 @@ def bot_run():
 
                 user_points = get_user_points(message.author.id, message.author.name, iso_format_date_taipei)
                 if user_points <= 0 and Point_deduction_system != 0:
+                    logger.error(user_points)
                     await message.reply("您的點數已用盡，無法繼續與我對話。")
                     return
 
