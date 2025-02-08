@@ -952,14 +952,13 @@ def bot_run():
                                 chinese_voice_found = False
                                 for voice in voices:
                                     # 更寬鬆的條件：包含 "zh"、"CN" 或 "TW" (不區分大小寫)
-                                    if "zh" in voice.id.lower() or "cn" in voice.id.lower() or "tw" in voice.id.lower():
+                                    if "zh" in voice.id.lower() or "Chinese" in voice.id.lower() or "tw" in voice.id.lower():
                                         engine.setProperty('voice', voice.id)
                                         chinese_voice_found = True
                                         break
 
                                 if not chinese_voice_found:
-                                    pass
-                                    #logger.warning("No suitable Chinese voice found. Using default.")
+                                    logger.warning("No suitable Chinese voice found. Using default.")
                                 for voice in voices:
                                     if voice.gender == 'VoiceGenderFemale' and 'en' in voice.languages:
                                         engine.setProperty('voice', voice.id)
