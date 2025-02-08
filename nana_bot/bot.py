@@ -939,15 +939,26 @@ def bot_run():
                             #     print(voice.id, voice.name, voice.languages)
 
                             # 尋找中文女生的聲音
+                            voices = engine.getProperty('voices')
+                            for voice in voices:
+                                print(f"ID: {voice.id}")
+                                print(f"Name: {voice.name}")
+                                print(f"Languages: {voice.languages}")
+                                print(f"Gender: {voice.gender}")
+                                print("-" * 20)
                             found_voice = False
                             for voice in voices:
-                                if voice.gender == 'VoiceGenderFemale' and ('TW' in voice.id or 'CN' in voice.id or 'zh' in voice.languages):
-                                     engine.setProperty('voice', voice.id)
-                                     found_voice = True
-                                     break  # 找到第一個符合條件的聲音就停止迴圈
-                            if not found_voice:
-                                logger.warning("No suitable Chinese female voice found. Using default.")
-                                #可能沒有安裝中文語音包，改用英文
+                                voices = engine.getProperty('voices')
+                                chinese_voice_found = False
+                                for voice in voices:
+                                    # 更寬鬆的條件：包含 "zh"、"CN" 或 "TW" (不區分大小寫)
+                                    if "zh" in voice.id.lower() or "cn" in voice.id.lower() or "tw" in voice.id.lower():
+                                        engine.setProperty('voice', voice.id)
+                                        chinese_voice_found = True
+                                        break
+
+                                if not chinese_voice_found:
+                                    logger.warning("No suitable Chinese voice found. Using default.")
                                 for voice in voices:
                                     if voice.gender == 'VoiceGenderFemale' and 'en' in voice.languages:
                                         engine.setProperty('voice', voice.id)
