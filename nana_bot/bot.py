@@ -958,7 +958,8 @@ def bot_run():
                                         break
 
                                 if not chinese_voice_found:
-                                    logger.warning("No suitable Chinese voice found. Using default.")
+                                    pass
+                                    #logger.warning("No suitable Chinese voice found. Using default.")
                                 for voice in voices:
                                     if voice.gender == 'VoiceGenderFemale' and 'en' in voice.languages:
                                         engine.setProperty('voice', voice.id)
