@@ -537,6 +537,7 @@ def bot_run():
                     cursor = conn.cursor()  # Re-create cursor after commit
                     cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(user_id),))
                     result = cursor.fetchone()
+                    print(result)
                 return result[0] if result else 0
             except sqlite3.Error as e:
                 logger.exception(f"Database error in get_user_points: {e}")
