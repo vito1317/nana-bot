@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import sqlite3
 from nana_bot import bot
 import logging
-
+import os
 @bot.tree.command(name="analytics", description="顯示用戶或頻道分析數據")
 @app_commands.describe(
     channel="選擇一個頻道以分析其數據",
@@ -26,14 +26,16 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
     db_name = 'analytics_server_' + str(interaction.guild.id) + '.db'
     # 直接 defer
     await interaction.response.defer()
-
-
-    conn = sqlite3.connect("./databases/"+db_name)
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../databases", db_name)
+    logging.info(f"Database path: {db_path}")
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
 
     def get_database_connection():
-        return sqlite3.connect("./databases/"+db_name)
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../databases", db_name)
+        logging.info(f"Database path: {db_path}")
+        return sqlite3.connect(db_path)
 
     # 確保所有表格都存在
     cursor.execute('''
@@ -266,7 +268,8 @@ async def analytics(interaction: discord.Interaction, analysis_type: str, channe
             return result[0] if result[0] else 0
 
     def get_user_token_count(userid):
-        with sqlite3.connect("./databases/"+db_name) as conn:
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../databases", db_name)
+        with sqlite3.connect(db_path) as conn:
             c = conn.cursor()
             c.execute('''
                 SELECT total_token_count FROM metadata WHERE userid = ?
