@@ -7,6 +7,7 @@ import pytz
 import sqlite3
 from nana_bot import bot, ALLOWED_ROLE_IDS, init_db_points, default_points
 import logging
+import os
 
 utc8 = timezone(timedelta(hours=8))
 
@@ -20,7 +21,8 @@ async def add_points(interaction: discord.Interaction, member: discord.Member, p
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     db_name = 'points_' + str(interaction.guild.id) + '.db'
-    conn = sqlite3.connect("./databases/"+db_name)
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db_name)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(member.id),))
@@ -90,7 +92,8 @@ async def subtract_points(interaction: discord.Interaction, member: discord.Memb
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     db_name = 'points_' + str(interaction.guild.id) + '.db'
-    conn = sqlite3.connect("./databases/"+db_name)
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db_name)
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(member.id),))
     result = cursor.fetchone()
@@ -150,7 +153,9 @@ async def subtract_points(interaction: discord.Interaction, member: discord.Memb
 async def check_points(interaction: discord.Interaction, member: discord.Member):
     init_db_points(str(interaction.guild.id))
     db_name = 'points_' + str(interaction.guild.id) + '.db'
-    conn = sqlite3.connect("./databases/"+db_name)
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases", db_name)
+
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     cursor.execute('SELECT points FROM users WHERE user_id = ?', (str(member.id),))
     result = cursor.fetchone()
