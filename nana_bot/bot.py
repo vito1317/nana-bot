@@ -952,7 +952,7 @@ def bot_run():
                                 chinese_voice_found = False
                                 for voice in voices:
                                     # 更寬鬆的條件：包含 "zh"、"CN" 或 "TW" (不區分大小寫)
-                                    if "cmn" in voice.id.lower() or "chinese" in voice.id.lower() or "yue" in voice.id.lower():
+                                    if "tw" in voice.id.lower() or "chinese" in voice.id.lower() or "yue" in voice.id.lower():
                                         engine.setProperty('voice', voice.id)
                                         chinese_voice_found = True
                                         break
