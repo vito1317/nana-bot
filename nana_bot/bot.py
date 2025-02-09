@@ -941,7 +941,7 @@ def bot_run():
                             # 尋找中文女生的聲音
                             voices = engine.getProperty('voices')
                             for voice in voices:
-                                print(f"ID: {voice.id}")
+                                print(f"ID: {voice.id.lower()}")
                                 print(f"Name: {voice.name}")
                                 print(f"Languages: {voice.languages}")
                                 print(f"Gender: {voice.gender}")
@@ -952,7 +952,7 @@ def bot_run():
                                 chinese_voice_found = False
                                 for voice in voices:
                                     # 更寬鬆的條件：包含 "zh"、"CN" 或 "TW" (不區分大小寫)
-                                    if "zh" in voice.id.lower() or "Chinese" in voice.id.lower() or "tw" in voice.id.lower():
+                                    if "cmn" in voice.id.lower() or "chinese" in voice.id.lower() or "yue" in voice.id.lower():
                                         engine.setProperty('voice', voice.id)
                                         chinese_voice_found = True
                                         break
