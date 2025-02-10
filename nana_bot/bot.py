@@ -471,7 +471,7 @@ def bot_run():
     async def on_message(message):
         if message.author == bot.user:
             return
-
+        bot_app_id = bot.user.id
         server_id = message.guild.id
         user_name = message.author.display_name or message.author.name
         user_id = message.author.id
