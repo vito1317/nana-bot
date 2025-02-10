@@ -301,7 +301,6 @@ def bot_run():
                     )
                 except discord.DiscordException as e:
                     logger.error(f"Error sending daily message: {e}")
-
     @bot.event
     async def on_ready():
         db_tables = {
@@ -309,7 +308,9 @@ def bot_run():
             "messages": "message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT",
             "message": "id INTEGER PRIMARY KEY, user TEXT, content TEXT, timestamp TEXT",
         }
-
+        # Initialize a default database
+        initialize_database("analytics_server_default.db", db_tables)
+        initialize_database("messages_chat_default.db", {"message": db_tables["message"]})
         guild_count = 0
         for guild in bot.guilds:
             guild_count += 1
@@ -472,10 +473,12 @@ def bot_run():
         if message.author == bot.user:
             return
         bot_app_id = bot.user.id
-        server_id = message.guild.id
+        server_id = message.guild.id if message.guild else "default"  # 預設值
         user_name = message.author.display_name or message.author.name
         user_id = message.author.id
         timestamp = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 使用 server_id 或預設值
         db_name = f"analytics_server_{server_id}.db"
         chat_db_name = f"messages_chat_{server_id}.db"
         points_db_name = 'points_' + str(server_id) + '.db'
