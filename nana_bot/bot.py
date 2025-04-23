@@ -539,7 +539,7 @@ def bot_run():
     async def on_message(message):
         if message.author == bot.user:
             return
-
+        print('debug')
         server_id = message.guild.id if message.guild else None
         if not server_id:
              return
