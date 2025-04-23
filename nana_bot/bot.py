@@ -58,7 +58,14 @@ def get_current_time_utc8():
 
 genai.configure(api_key=API_KEY)
 not_reviewed_role_id = not_reviewed_id
-model = genai.GenerativeModel(gemini_model)
+# 確保 model 是 GenerativeModel 物件
+try:
+    model = genai.GenerativeModel(gemini_model)
+except Exception as e:
+    logger.critical(f"Failed to initialize GenerativeModel: {e}")
+    # 在這裡可以選擇退出程式或設置一個標誌表示 AI 功能不可用
+    model = None # 設置為 None 表示模型不可用
+
 send_daily_channel_id = send_daily_channel_id_list
 
 voice_clients = {}
@@ -82,6 +89,9 @@ def bot_run():
 
     @bot.event
     async def on_ready():
+        if model is None:
+             logger.error("AI Model failed to initialize. AI reply functionality will be disabled.")
+
         db_tables = {
             "users": "user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0",
             "messages": "message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT",
@@ -105,11 +115,18 @@ def bot_run():
             })
 
             guild_obj = discord.Object(id=guild.id)
-            bot.tree.copy_global_to(guild=guild_obj)
+            # 移除 bot.tree.copy_global_to(guild=guild_obj) 這一行，因為通常不需要每個伺服器都複製全域指令
             try:
-                slash = await bot.tree.sync(guild=guild_obj)
+                # 同步指令到特定伺服器（如果需要）
+                # slash = await bot.tree.sync(guild=guild_obj)
+                # logger.info(f"在 {guild.name} 同步 {len(slash)} 個斜線指令")
+
+                # 或者只同步全域指令一次
+                if guild_count == 1: # 只在第一個伺服器同步一次全域指令
+                    synced = await bot.tree.sync()
+                    logger.info(f"Synced {len(synced)} global commands.")
+
                 print(f"目前登入身份 --> {bot.user}")
-                print(f"在 {guild.name} 載入 {len(slash)} 個斜線指令")
             except discord.errors.Forbidden:
                  logger.warning(f"無法在 {guild.name} (ID: {guild.id}) 同步指令，可能缺少權限。")
             except Exception as e:
@@ -123,6 +140,11 @@ def bot_run():
 
     @bot.event
     async def on_member_join(member):
+        if model is None: # 如果模型未初始化，則不執行歡迎訊息
+             logger.warning("AI Model not initialized. Skipping welcome message generation.")
+             # 可以選擇在這裡發送一個不依賴 AI 的簡單歡迎訊息
+             # return
+
         logger.info(f"New member joined: {member} in server ID: {member.guild.id}")
         server_id = member.guild.id
 
@@ -187,33 +209,41 @@ def bot_run():
                     except discord.HTTPException as e:
                         logger.error(f"Failed to add role to member {member.name} (ID: {member.id}): {e}")
 
-                try:
-                    responses = model.generate_content(
-                        [
-                            f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
-                            f"你現在要做的事是歡迎使用者{member.mention}的加入並且引導使用者使用系統，同時也可以請你自己做一下自我介紹(以你{bot_name}的身分做自我介紹而不是請使用者做自我介紹)，同時，請不要詢問使用者想要聊聊嗎、想要聊什麼之類的話。同時也請不要回覆這則訊息。",
-                            f"第二步是tag <#{newcomer_review_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，請務必引導使用者講述自己的病症與情況，而不是只傳送 <#{newcomer_review_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也並不是請你去示範，也不是請他跟你分享要聊什麼，也請不要請新人(使用者)與您分享相關訊息",
-                            f"新人審核格式包誇(```{review_format}```)，example(僅為範例，請勿照抄):(你好！歡迎加入{member.guild.name}，很高興認識你！我叫{bot_name}，是你們的心理支持輔助機器人。如果你有任何情感困擾、生活問題，或是需要一點建議，都歡迎在審核後找我聊聊。我會盡力以溫暖、理解的方式傾聽，並給你專業的建議和支持。但在你跟我聊天以前，需要請你先到 <#{newcomer_review_channel_id}> 填寫以下資訊，方便我更好的為你服務！ ```{review_format}```)請記住務必傳送>> ```{review_format}```和<#{newcomer_review_channel_id}> <<",
-                        ],
-                         safety_settings={
-                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                        }
-                    )
-                    if channel:
-                        embed = discord.Embed(
-                            title="歡迎加入", description=responses.text, color=discord.Color.blue()
+                # 只有在模型成功初始化時才嘗試生成 AI 歡迎訊息
+                if model:
+                    try:
+                        responses = model.generate_content(
+                            [
+                                f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
+                                f"你現在要做的事是歡迎使用者{member.mention}的加入並且引導使用者使用系統，同時也可以請你自己做一下自我介紹(以你{bot_name}的身分做自我介紹而不是請使用者做自我介紹)，同時，請不要詢問使用者想要聊聊嗎、想要聊什麼之類的話。同時也請不要回覆這則訊息。",
+                                f"第二步是tag <#{newcomer_review_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，請務必引導使用者講述自己的病症與情況，而不是只傳送 <#{newcomer_review_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也並不是請你去示範，也不是請他跟你分享要聊什麼，也請不要請新人(使用者)與您分享相關訊息",
+                                f"新人審核格式包誇(```{review_format}```)，example(僅為範例，請勿照抄):(你好！歡迎加入{member.guild.name}，很高興認識你！我叫{bot_name}，是你們的心理支持輔助機器人。如果你有任何情感困擾、生活問題，或是需要一點建議，都歡迎在審核後找我聊聊。我會盡力以溫暖、理解的方式傾聽，並給你專業的建議和支持。但在你跟我聊天以前，需要請你先到 <#{newcomer_review_channel_id}> 填寫以下資訊，方便我更好的為你服務！ ```{review_format}```)請記住務必傳送>> ```{review_format}```和<#{newcomer_review_channel_id}> <<",
+                            ],
+                            safety_settings={
+                                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                            }
                         )
-                        await channel.send(embed=embed)
-                except Exception as e:
-                    logger.exception(f"Error generating welcome message for {member.name} (ID: {member.id}): {e}")
-                    if channel:
-                        try:
-                             await channel.send(f"歡迎 {member.mention} 加入！詳細的介紹訊息生成失敗，請先前往 <#{newcomer_review_channel_id}> 進行審核。")
-                        except discord.DiscordException as send_error:
-                             logger.error(f"Failed to send fallback welcome message: {send_error}")
+                        if channel:
+                            embed = discord.Embed(
+                                title="歡迎加入", description=responses.text, color=discord.Color.blue()
+                            )
+                            await channel.send(embed=embed)
+                    except Exception as e:
+                        logger.exception(f"Error generating welcome message for {member.name} (ID: {member.id}): {e}")
+                        if channel:
+                            try:
+                                await channel.send(f"歡迎 {member.mention} 加入！詳細的介紹訊息生成失敗，請先前往 <#{newcomer_review_channel_id}> 進行審核。")
+                            except discord.DiscordException as send_error:
+                                logger.error(f"Failed to send fallback welcome message: {send_error}")
+                elif channel: # 如果 AI 模型未初始化，發送簡單的歡迎訊息
+                    try:
+                        await channel.send(f"歡迎 {member.mention} 加入！請前往 <#{newcomer_review_channel_id}> 進行審核。")
+                    except discord.DiscordException as send_error:
+                        logger.error(f"Failed to send simple welcome message: {send_error}")
+
                 break
 
 
@@ -461,21 +491,48 @@ def bot_run():
                     await asyncio.sleep(0.1)
 
                 audio_source = discord.FFmpegPCMAudio(temp_file_path)
-                bot_voice_client.play(audio_source, after=lambda e: logger.error(f'TTS Player error: {e}') if e else None)
+                # 增加錯誤處理回調
+                bot_voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
+                    handle_tts_error(e, temp_file_path), bot.loop
+                ).result())
+
 
             except gTTS.gTTSError as e:
                  logger.error(f"gTTS Error generating join notification for {user_name}: {e}")
+                 # 確保即使 gTTS 失敗也嘗試清理文件
+                 if temp_file_path and os.path.exists(temp_file_path):
+                      try:
+                           os.remove(temp_file_path)
+                      except OSError as rm_err:
+                           logger.error(f"Error removing temporary TTS file after gTTS error: {rm_err}")
             except discord.errors.ClientException as e:
                  logger.error(f"Discord ClientException playing join notification: {e}")
+                 if temp_file_path and os.path.exists(temp_file_path):
+                      try:
+                           os.remove(temp_file_path)
+                      except OSError as rm_err:
+                           logger.error(f"Error removing temporary TTS file after ClientException: {rm_err}")
             except Exception as e:
                 logger.exception(f"Error playing TTS join notification for {user_name}: {e}")
-            finally:
+                # 確保即使未知錯誤也嘗試清理文件
                 if temp_file_path and os.path.exists(temp_file_path):
-                    await asyncio.sleep(0.5)
-                    try:
-                        os.remove(temp_file_path)
-                    except OSError as e:
-                        logger.error(f"Error removing temporary TTS file {temp_file_path}: {e}")
+                     try:
+                          os.remove(temp_file_path)
+                     except OSError as rm_err:
+                          logger.error(f"Error removing temporary TTS file after unexpected error: {rm_err}")
+
+    async def handle_tts_error(error, file_path):
+        """處理 TTS 播放完成後的回調，包含錯誤處理和文件刪除"""
+        if error:
+            logger.error(f'TTS Player error: {error}')
+        if file_path and os.path.exists(file_path):
+            try:
+                # 稍微延遲以確保文件不再被鎖定
+                await asyncio.sleep(0.2)
+                os.remove(file_path)
+                # logger.debug(f"Successfully removed temporary TTS file: {file_path}")
+            except OSError as e:
+                logger.error(f"Error removing temporary TTS file {file_path} in callback: {e}")
 
 
     @bot.event
@@ -486,6 +543,14 @@ def bot_run():
         server_id = message.guild.id if message.guild else None
         if not server_id:
              return
+
+        # 檢查 AI 模型是否可用
+        if model is None:
+             # 如果模型不可用，可以選擇完全不回應或給出提示
+             if bot.user.mentioned_in(message) or str(message.channel.id) in TARGET_CHANNEL_ID:
+                  logger.warning("AI Model not available, cannot process message.")
+                  # await message.reply("抱歉，AI 功能目前無法使用。", mention_author=False)
+             return # 不繼續處理 AI 相關邏輯
 
         user_name = message.author.display_name or message.author.name
         user_id = message.author.id
@@ -555,9 +620,11 @@ def bot_run():
                         (user_name_str, user_id_str),
                     )
                 else:
+                    # 確保 join_date_iso 不是 None
+                    join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
                     c.execute(
                         "INSERT INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)",
-                        (user_id_str, user_name_str, join_date_iso, 1),
+                        (user_id_str, user_name_str, join_date_to_insert, 1),
                     )
                 conn.commit()
             except sqlite3.Error as e:
@@ -690,10 +757,12 @@ def bot_run():
 
                 if result:
                     return int(result[0])
-                elif default_points > 0 and user_name_str and join_date_iso:
+                elif default_points > 0 and user_name_str:
+                    # 確保 join_date_iso 不是 None
+                    join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
                     logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB. Creating with {default_points} points.")
                     cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)',
-                                   (user_id_str, user_name_str, join_date_iso, default_points))
+                                   (user_id_str, user_name_str, join_date_to_insert, default_points))
                     cursor.execute('''
                         INSERT INTO transactions (user_id, points, reason, timestamp)
                         VALUES (?, ?, ?, ?)
@@ -721,8 +790,10 @@ def bot_run():
             try:
                 conn = sqlite3.connect(points_db_path, timeout=10)
                 cursor = conn.cursor()
-                cursor.execute('CREATE TABLE IF NOT EXISTS users (...)')
-                cursor.execute('CREATE TABLE IF NOT EXISTS transactions (...)')
+                # 確保表存在
+                cursor.execute(''' CREATE TABLE IF NOT EXISTS users ( user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT 0 ) ''')
+                cursor.execute(''' CREATE TABLE IF NOT EXISTS transactions ( id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT ) ''')
+
 
                 current_points = get_user_points(user_id_str)
 
@@ -746,6 +817,7 @@ def bot_run():
                 if conn:
                     conn.close()
 
+        # --- 訊息記錄和更新 ---
         conn_analytics = None
         try:
             conn_analytics = sqlite3.connect(analytics_db_path, timeout=10)
@@ -787,12 +859,18 @@ def bot_run():
                 join_date_iso = join_date_utc8.isoformat()
             except Exception as e:
                  logger.error(f"Error converting join date for user {user_id}: {e}")
-                 join_date_iso = message.author.joined_at.replace(tzinfo=None).isoformat()
+                 # 如果轉換失敗，嘗試使用 UTC 時間並移除時區信息
+                 try:
+                      join_date_iso = message.author.joined_at.replace(tzinfo=None).isoformat()
+                 except Exception as iso_err:
+                      logger.error(f"Error converting join date to ISO format for user {user_id}: {iso_err}")
+
 
         update_user_message_count(str(user_id), user_name, join_date_iso)
 
         await bot.process_commands(message)
 
+        # --- 檢查是否需要 AI 回應 ---
         should_respond = False
         if bot.user.mentioned_in(message) and not message.mention_everyone:
              should_respond = True
@@ -819,6 +897,7 @@ def bot_run():
                     if Point_deduction_system > 0:
                         deduct_points(str(user_id), Point_deduction_system)
 
+                    # --- 準備 Prompt 和歷史記錄 ---
                     initial_prompt = (
                         f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。"
                         f"她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，"
@@ -876,12 +955,14 @@ def bot_run():
                         logger.debug("--- End Chat History ---")
                         logger.debug(f"Current User Message: {message.content}")
 
-                    chat = None
-                    api_reply_text = ""
+                    # --- 建立對話 & 發送第一次訊息給 Gemini ---
+                    chat = model.start_chat(history=chat_history_processed)
+                    current_user_message = f"{timestamp} {user_name}: {message.content}"
+                    api_response_text = "" # 初始化最終回覆內容
+
                     try:
-                        chat = model.start_chat(history=chat_history_processed)
                         response = chat.send_message(
-                            f"{timestamp} {user_name}: {message.content}",
+                            current_user_message,
                             stream=False,
                             safety_settings={
                                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
@@ -894,10 +975,7 @@ def bot_run():
                         if response.prompt_feedback and response.prompt_feedback.block_reason:
                              block_reason = response.prompt_feedback.block_reason
                              logger.warning(f"Gemini API blocked prompt for user {user_id}. Reason: {block_reason}")
-                             if block_reason == HarmBlockThreshold.BLOCK_REASON_SAFETY:
-                                 await message.reply("抱歉，您的訊息觸發了安全限制，我無法處理。", mention_author=False)
-                             else:
-                                 await message.reply("抱歉，由於內容限制，我無法回覆您的訊息。", mention_author=False)
+                             await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
                              return
 
                         if not response.candidates:
@@ -905,9 +983,142 @@ def bot_run():
                             await message.reply("抱歉，我暫時無法產生回應，請稍後再試。", mention_author=False)
                             return
 
-                        api_reply_text = response.text.strip()
-                        logger.info(f"Gemini API raw response for user {user_id}: {api_reply_text}")
+                        first_api_reply = response.text.strip()
+                        logger.info(f"Gemini API initial response for user {user_id}: {first_api_reply}")
+                        api_response_text = first_api_reply # 預設使用第一次回覆
 
+                        # --- 檢查第一次回覆是否包含指令 ---
+                        search_match = re.search(r"/search\s+(\w+)\s+(.+)", first_api_reply, re.IGNORECASE | re.DOTALL)
+                        browse_match = re.search(r"/browse\s+(https?://\S+)", first_api_reply, re.IGNORECASE)
+
+                        tool_result_prompt = None # 用於儲存工具結果並發回給 AI
+
+                        if search_match:
+                            search_engine = search_match.group(1).lower()
+                            search_query = search_match.group(2).strip()
+                            logger.info(f"Bot wants to search '{search_engine}' for: '{search_query}'")
+
+                            reply_before_command = first_api_reply[:search_match.start()].strip()
+                            if reply_before_command:
+                                 await message.reply(reply_before_command, mention_author=False)
+
+                            search_results_text = ""
+                            search_success = False
+                            try:
+                                if search_engine in ["google", "bing", "yahoo"]:
+                                    await message.channel.send(f"*正在使用 {search_engine.capitalize()} 搜尋：{search_query}...*", delete_after=10.0)
+                                    search_module = globals()[search_engine]
+                                    results_list = search_module.search(search_query, "request")
+
+                                    if results_list:
+                                         formatted_results = []
+                                         for i, res in enumerate(results_list[:5], 1):
+                                              title = res.get('title', 'N/A')
+                                              href = res.get('href', '#')
+                                              abstract = res.get('abstract', 'N/A').replace('\n', ' ')
+                                              formatted_results.append(f"{i}. **[{title}]({href})**\n   *摘要:* {abstract[:150]}{'...' if len(abstract)>150 else ''}")
+                                         search_results_text = "\n\n".join(formatted_results)
+                                         search_success = True
+
+                                         embed = discord.Embed(
+                                             title=f"{search_engine.capitalize()} 搜尋結果： \"{search_query}\"",
+                                             description=search_results_text,
+                                             color=discord.Color.blue()
+                                         )
+                                         await message.reply(embed=embed, mention_author=False)
+                                    else:
+                                         await message.reply(f"使用 {search_engine.capitalize()} 搜尋 \"{search_query}\" 時沒有找到結果。", mention_author=False)
+                                         search_results_text = f"找不到 '{search_query}' 的相關結果。"
+                                else:
+                                    await message.reply(f"我不支援使用 '{search_engine}' 進行搜尋。", mention_author=False)
+                                    search_results_text = f"錯誤：不支援的搜尋引擎 '{search_engine}'。"
+
+                            except Exception as search_error:
+                                logger.exception(f"Error performing search ({search_engine}, '{search_query}'): {search_error}")
+                                await message.reply(f"搜尋 '{search_query}' 時發生錯誤。", mention_author=False)
+                                search_results_text = f"錯誤：搜尋 '{search_query}' 時發生問題。"
+
+                            # 準備將搜尋結果發回給 AI
+                            tool_result_prompt = f"這是 '{search_query}' 的搜尋結果:\n{search_results_text}\n\n請根據這些結果繼續對話或提供總結。"
+
+                        elif browse_match:
+                            browse_url = browse_match.group(1)
+                            logger.info(f"Bot wants to browse URL: {browse_url}")
+
+                            reply_before_command = first_api_reply[:browse_match.start()].strip()
+                            if reply_before_command:
+                                 await message.reply(reply_before_command, mention_author=False)
+
+                            browse_content_text = ""
+                            try:
+                                await message.channel.send(f"*正在瀏覽網頁：{browse_url}...*", delete_after=10.0)
+                                headers = {
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                                }
+                                browse_response = await asyncio.to_thread(requests.get, browse_url, headers=headers, timeout=15)
+                                browse_response.raise_for_status()
+
+                                soup = BeautifulSoup(browse_response.content, "html.parser")
+                                for script_or_style in soup(["script", "style"]):
+                                    script_or_style.decompose()
+                                body = soup.body
+                                if body:
+                                     for noisy_tag in body.select('nav, footer, header, .sidebar, #sidebar, .ad, #ad'):
+                                          noisy_tag.decompose()
+                                     browse_content_text = body.get_text(separator='\n', strip=True)
+                                else:
+                                     browse_content_text = soup.get_text(separator='\n', strip=True)
+
+                                max_browse_length = 5000
+                                if len(browse_content_text) > max_browse_length:
+                                     browse_content_text = browse_content_text[:max_browse_length] + "\n... (內容過長，已截斷)"
+                                logger.info(f"Browsed content length: {len(browse_content_text)}")
+
+                            except requests.exceptions.RequestException as browse_error:
+                                logger.error(f"Error browsing URL {browse_url}: {browse_error}")
+                                await message.reply(f"無法瀏覽網址：{browse_url} ({browse_error})", mention_author=False)
+                                browse_content_text = f"錯誤：無法訪問網址 {browse_url}。"
+                            except Exception as parse_error:
+                                logger.exception(f"Error parsing content from {browse_url}: {parse_error}")
+                                await message.reply(f"無法解析網址 {browse_url} 的內容。", mention_author=False)
+                                browse_content_text = f"錯誤：解析網址 {browse_url} 內容時發生問題。"
+
+                            # 準備將瀏覽結果發回給 AI
+                            tool_result_prompt = f"這是從 {browse_url} 瀏覽到的內容摘要:\n{browse_content_text}\n\n請根據這些內容繼續對話或提供總結。"
+
+                        # --- 如果有工具結果，發送回 AI 進行處理 ---
+                        if tool_result_prompt:
+                            logger.info("Sending tool results back to Gemini...")
+                            # 將第一次 AI 的回覆（包含指令）也加入歷史記錄
+                            chat.history.append({"role": "model", "parts": [{"text": first_api_reply}]})
+                            # 將工具結果作為新的 user prompt 發送
+                            response = chat.send_message(
+                                tool_result_prompt,
+                                stream=False,
+                                safety_settings={ # 再次應用安全設置
+                                    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                                    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                                    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                                    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                                }
+                            )
+
+                            if response.prompt_feedback and response.prompt_feedback.block_reason:
+                                 logger.warning(f"Gemini API blocked prompt after tool result. Reason: {response.prompt_feedback.block_reason}")
+                                 await message.reply("抱歉，處理工具結果時觸發了內容限制。", mention_author=False)
+                                 return
+
+                            if not response.candidates:
+                                logger.warning("No candidates returned from Gemini API after tool result.")
+                                await message.reply("抱歉，我處理完工具結果後無法產生回應。", mention_author=False)
+                                return
+
+                            # 使用 AI 處理工具結果後的回應作為最終回覆
+                            api_response_text = response.text.strip()
+                            logger.info(f"Gemini API final response after tool result: {api_response_text}")
+                        # --- 如果沒有指令，api_response_text 就是第一次的回覆 ---
+
+                        # --- 記錄 Token ---
                         try:
                              if hasattr(response, 'usage_metadata') and response.usage_metadata:
                                  total_token_count = response.usage_metadata.get('total_token_count')
@@ -915,235 +1126,49 @@ def bot_run():
                                      logger.info(f"Total token count from usage_metadata: {total_token_count}")
                                      update_token_in_db(total_token_count, str(user_id), channel_id)
                                  else:
-                                     logger.warning("Could not find 'total_token_count' in usage_metadata.")
+                                     # 如果 usage_metadata 中沒有，嘗試從 candidates 獲取
+                                     if response.candidates and hasattr(response.candidates[0], 'token_count'):
+                                          total_token_count = response.candidates[0].token_count
+                                          logger.info(f"Total token count from candidate: {total_token_count}")
+                                          update_token_in_db(total_token_count, str(user_id), channel_id)
+                                     else:
+                                         logger.warning("Could not find token count in usage_metadata or candidate.")
                              else:
-                                 match = re.search(r'"total_token_count":\s*(\d+)', str(response))
-                                 if match:
-                                     total_token_count = int(match.group(1))
-                                     logger.info(f"Total token count parsed from string: {total_token_count}")
-                                     update_token_in_db(total_token_count, str(user_id), channel_id)
-                                 else:
-                                     logger.warning("Token count match not found in API response string.")
+                                 logger.warning("No usage_metadata found in API response.")
                         except Exception as token_error:
                              logger.error(f"Error processing token count: {token_error}")
 
+                        # --- 儲存對話記錄 ---
                         store_message(user_name, message.content, timestamp)
-                        if api_reply_text:
-                             store_message(bot_name, api_reply_text, timestamp)
+                        if api_response_text: # 儲存最終的 AI 回應
+                             store_message(bot_name, api_response_text, timestamp)
 
-                    except genai.types.BlockedPromptException as e:
-                         logger.warning(f"Gemini API blocked prompt (exception) for user {user_id}: {e}")
-                         await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
-                         return
-                    except genai.types.StopCandidateException as e:
-                         logger.warning(f"Gemini API stopped candidate generation for user {user_id}: {e}")
-                         try:
-                              api_reply_text = e.candidate.text.strip() if e.candidate else ""
-                              if api_reply_text:
-                                   logger.info(f"Partial Gemini response due to StopCandidateException: {api_reply_text}")
-                                   store_message(bot_name, api_reply_text, timestamp)
-                              else:
-                                   await message.reply("抱歉，產生回應時被中斷，請稍後再試。", mention_author=False)
-                                   return
-                         except Exception as partial_error:
-                              logger.error(f"Error getting partial response after StopCandidateException: {partial_error}")
-                              await message.reply("抱歉，產生回應時遇到問題，請稍後再試。", mention_author=False)
-                              return
-                    except Exception as e:
-                        logger.exception(f"Error during Gemini API call for user {user_id}: {e}")
-                        await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
-                        return
-
-                    search_match = re.search(r"/search\s+(\w+)\s+(.+)", api_reply_text, re.IGNORECASE | re.DOTALL)
-                    browse_match = re.search(r"/browse\s+(https?://\S+)", api_reply_text, re.IGNORECASE)
-
-                    final_reply_to_user = api_reply_text
-
-                    if search_match:
-                        search_engine = search_match.group(1).lower()
-                        search_query = search_match.group(2).strip()
-                        logger.info(f"Bot wants to search '{search_engine}' for: '{search_query}'")
-
-                        reply_before_search = api_reply_text[:search_match.start()].strip()
-                        if reply_before_search:
-                             await message.reply(reply_before_search, mention_author=False)
-
-                        search_results_text = ""
-                        try:
-                            if search_engine in ["google", "bing", "yahoo"]:
-                                await message.channel.send(f"*正在使用 {search_engine.capitalize()} 搜尋：{search_query}...*", delete_after=10.0)
-                                search_module = globals()[search_engine]
-                                results_list = search_module.search(search_query, "request")
-
-                                if results_list:
-                                     formatted_results = []
-                                     for i, res in enumerate(results_list[:5], 1):
-                                          title = res.get('title', 'N/A')
-                                          href = res.get('href', '#')
-                                          abstract = res.get('abstract', 'N/A').replace('\n', ' ')
-                                          formatted_results.append(f"{i}. **[{title}]({href})**\n   *摘要:* {abstract[:150]}{'...' if len(abstract)>150 else ''}")
-                                     search_results_text = "\n\n".join(formatted_results)
-
-                                     embed = discord.Embed(
-                                         title=f"{search_engine.capitalize()} 搜尋結果： \"{search_query}\"",
-                                         description=search_results_text if search_results_text else "找不到相關結果。",
-                                         color=discord.Color.blue()
-                                     )
-                                     await message.reply(embed=embed, mention_author=False)
-
-                                else:
-                                     await message.reply(f"使用 {search_engine.capitalize()} 搜尋 \"{search_query}\" 時沒有找到結果。", mention_author=False)
-
-                            else:
-                                await message.reply(f"我不支援使用 '{search_engine}' 進行搜尋。", mention_author=False)
-                                search_results_text = f"錯誤：不支援的搜尋引擎 '{search_engine}'"
-
-                        except Exception as search_error:
-                            logger.exception(f"Error performing search ({search_engine}, '{search_query}'): {search_error}")
-                            await message.reply(f"搜尋 '{search_query}' 時發生錯誤。", mention_author=False)
-                            search_results_text = f"錯誤：搜尋時發生問題 - {search_error}"
-
-                        if search_results_text and not search_results_text.startswith("錯誤"):
-                             try:
-                                 search_summary_history = chat_history_processed + [
-                                      {"role": "model", "parts": [{"text": api_reply_text}]},
-                                      {"role": "user", "parts": [{"text": f"這是 '{search_query}' 的搜尋結果摘要:\n{search_results_text}\n\n請根據這些結果繼續對話。"}]}
-                                 ]
-
-                                 search_chat = model.start_chat(history=search_summary_history[:-1])
-
-                                 summary_response = search_chat.send_message(
-                                      search_summary_history[-1]["parts"][0]["text"],
-                                      stream=False,
-                                      safety_settings={ HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                                                       HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                                                       HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                                                       HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE}
-                                  )
-
-                                 if summary_response.candidates:
-                                      summary_text = summary_response.text.strip()
-                                      logger.info(f"Gemini summary of search results: {summary_text}")
-                                      final_reply_to_user = summary_text
-                                      store_message(bot_name, summary_text, timestamp)
-                                      await message.reply(final_reply_to_user, mention_author=False)
-                                 else:
-                                      logger.warning("Gemini did not provide a summary for the search results.")
-                                      final_reply_to_user = ""
-
-                             except Exception as summary_error:
-                                  logger.exception(f"Error getting Gemini summary for search results: {summary_error}")
-                                  final_reply_to_user = ""
-
-                        else:
-                             final_reply_to_user = ""
-
-                    elif browse_match:
-                        browse_url = browse_match.group(1)
-                        logger.info(f"Bot wants to browse URL: {browse_url}")
-
-                        reply_before_browse = api_reply_text[:browse_match.start()].strip()
-                        if reply_before_browse:
-                             await message.reply(reply_before_browse, mention_author=False)
-
-                        browse_content_text = ""
-                        try:
-                            await message.channel.send(f"*正在瀏覽網頁：{browse_url}...*", delete_after=10.0)
-
-                            headers = {
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                            }
-                            browse_response = await asyncio.to_thread(requests.get, browse_url, headers=headers, timeout=15)
-                            browse_response.raise_for_status()
-
-                            soup = BeautifulSoup(browse_response.content, "html.parser")
-                            for script_or_style in soup(["script", "style"]):
-                                script_or_style.decompose()
-                            body = soup.body
-                            if body:
-                                 for noisy_tag in body.select('nav, footer, header, .sidebar, #sidebar, .ad, #ad'):
-                                      noisy_tag.decompose()
-                                 browse_content_text = body.get_text(separator='\n', strip=True)
-                            else:
-                                 browse_content_text = soup.get_text(separator='\n', strip=True)
-
-                            max_browse_length = 5000
-                            if len(browse_content_text) > max_browse_length:
-                                 browse_content_text = browse_content_text[:max_browse_length] + "\n... (內容過長，已截斷)"
-                            logger.info(f"Browsed content length: {len(browse_content_text)}")
-
-                        except requests.exceptions.RequestException as browse_error:
-                            logger.error(f"Error browsing URL {browse_url}: {browse_error}")
-                            await message.reply(f"無法瀏覽網址：{browse_url} ({browse_error})", mention_author=False)
-                            browse_content_text = f"錯誤：無法訪問網址 - {browse_error}"
-                        except Exception as parse_error:
-                            logger.exception(f"Error parsing content from {browse_url}: {parse_error}")
-                            await message.reply(f"無法解析網址 {browse_url} 的內容。", mention_author=False)
-                            browse_content_text = f"錯誤：解析網頁內容時發生問題 - {parse_error}"
-
-                        if browse_content_text and not browse_content_text.startswith("錯誤"):
-                             try:
-                                 browse_summary_history = chat_history_processed + [
-                                      {"role": "model", "parts": [{"text": api_reply_text}]},
-                                      {"role": "user", "parts": [{"text": f"這是從 {browse_url} 瀏覽到的內容摘要:\n{browse_content_text}\n\n請根據這些內容繼續對話。"}]}
-                                 ]
-
-                                 browse_chat = model.start_chat(history=browse_summary_history[:-1])
-
-                                 summary_response = browse_chat.send_message(
-                                      browse_summary_history[-1]["parts"][0]["text"],
-                                      stream=False,
-                                      safety_settings={ HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                                                       HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                                                       HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                                                       HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE}
-                                  )
-
-                                 if summary_response.candidates:
-                                      summary_text = summary_response.text.strip()
-                                      logger.info(f"Gemini summary of browsed content: {summary_text}")
-                                      final_reply_to_user = summary_text
-                                      store_message(bot_name, summary_text, timestamp)
-                                      await message.reply(final_reply_to_user, mention_author=False)
-                                 else:
-                                      logger.warning("Gemini did not provide a summary for the browsed content.")
-                                      await message.reply(f"我已瀏覽完 {browse_url}，但無法生成摘要。您可以自行查看。", mention_author=False)
-                                      final_reply_to_user = ""
-
-                             except Exception as summary_error:
-                                  logger.exception(f"Error getting Gemini summary for browsed content: {summary_error}")
-                                  await message.reply("總結瀏覽內容時發生錯誤。", mention_author=False)
-                                  final_reply_to_user = ""
-                        else:
-                             final_reply_to_user = ""
-
-                    else:
-                        if final_reply_to_user:
-                            if len(final_reply_to_user) > 2000:
-                                logger.warning(f"API reply exceeds 2000 characters ({len(final_reply_to_user)}). Truncating.")
+                        # --- 發送最終回覆給使用者 ---
+                        if api_response_text:
+                            if len(api_response_text) > 2000:
+                                logger.warning(f"Final API reply exceeds 2000 characters ({len(api_response_text)}). Truncating.")
                                 parts = []
-                                while len(final_reply_to_user) > 2000:
-                                     split_index = final_reply_to_user.rfind('\n', 0, 1990)
-                                     if split_index == -1:
-                                          split_index = final_reply_to_user.rfind('.', 0, 1990)
-                                     if split_index == -1:
-                                          split_index = 1990
-                                     parts.append(final_reply_to_user[:split_index])
-                                     final_reply_to_user = final_reply_to_user[split_index:].strip()
-                                parts.append(final_reply_to_user)
+                                while len(api_response_text) > 2000:
+                                     split_index = api_response_text.rfind('\n', 0, 1990)
+                                     if split_index == -1: split_index = api_response_text.rfind('.', 0, 1990)
+                                     if split_index == -1: split_index = 1990
+                                     parts.append(api_response_text[:split_index])
+                                     api_response_text = api_response_text[split_index:].strip()
+                                parts.append(api_response_text)
 
                                 for part in parts:
                                      await message.reply(part, mention_author=False)
                                      await asyncio.sleep(0.5)
                             else:
-                                await message.reply(final_reply_to_user, mention_author=False)
+                                await message.reply(api_response_text, mention_author=False)
 
+                            # --- 語音播放 ---
                             guild_voice_client = voice_clients.get(server_id)
                             if guild_voice_client and guild_voice_client.is_connected():
-                                logger.info('Generating TTS for standard reply...')
+                                logger.info('Generating TTS for final reply...')
                                 tts_temp_file_path = None
                                 try:
-                                    tts_text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', final_reply_to_user)
+                                    tts_text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text)
                                     tts_text = re.sub(r'[*_`~]', '', tts_text)
 
                                     tts = gTTS(text=tts_text, lang='zh-tw')
@@ -1155,21 +1180,31 @@ def bot_run():
                                         await asyncio.sleep(0.1)
 
                                     audio_source = discord.FFmpegPCMAudio(tts_temp_file_path)
-                                    guild_voice_client.play(audio_source, after=lambda e: logger.error(f'TTS Player error: {e}') if e else None)
+                                    guild_voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
+                                        handle_tts_error(e, tts_temp_file_path), bot.loop
+                                    ).result())
+
 
                                 except gTTS.gTTSError as e:
-                                     logger.error(f"gTTS Error generating standard reply TTS: {e}")
+                                     logger.error(f"gTTS Error generating final reply TTS: {e}")
+                                     if tts_temp_file_path and os.path.exists(tts_temp_file_path): os.remove(tts_temp_file_path) # 清理
                                 except discord.errors.ClientException as e:
-                                     logger.error(f"Discord ClientException playing standard reply TTS: {e}")
+                                     logger.error(f"Discord ClientException playing final reply TTS: {e}")
+                                     if tts_temp_file_path and os.path.exists(tts_temp_file_path): os.remove(tts_temp_file_path) # 清理
                                 except Exception as e:
-                                    logger.exception(f"TTS Error for standard reply: {e}")
-                                finally:
-                                    if tts_temp_file_path and os.path.exists(tts_temp_file_path):
-                                        await asyncio.sleep(0.5)
-                                        try:
-                                             os.remove(tts_temp_file_path)
-                                        except OSError as e:
-                                             logger.error(f"Error removing temporary TTS file {tts_temp_file_path}: {e}")
+                                    logger.exception(f"TTS Error for final reply: {e}")
+                                    if tts_temp_file_path and os.path.exists(tts_temp_file_path): os.remove(tts_temp_file_path) # 清理
+
+
+                    except genai.types.BlockedPromptException as e:
+                         logger.warning(f"Gemini API blocked prompt (initial call) for user {user_id}: {e}")
+                         await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
+                    except genai.types.StopCandidateException as e:
+                         logger.warning(f"Gemini API stopped candidate generation (initial call) for user {user_id}: {e}")
+                         await message.reply("抱歉，產生回應時被中斷，請稍後再試。", mention_author=False)
+                    except Exception as e:
+                        logger.exception(f"Error during Gemini API interaction for user {user_id}: {e}")
+                        await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
 
 
                 except discord.errors.HTTPException as e:
@@ -1188,14 +1223,22 @@ def bot_run():
         bot.run(discord_bot_token)
     except discord.errors.LoginFailure:
         logger.critical("Login Failed: Invalid Discord Token provided.")
+    except discord.HTTPException as e:
+         logger.critical(f"Failed to connect to Discord: {e}")
     except Exception as e:
         logger.critical(f"Critical error running the bot: {e}")
         logger.critical(traceback.format_exc())
 
 
 if __name__ == "__main__":
-     logger.info("Starting bot...")
-     bot_run()
-     logger.info("Bot stopped.")
+     # 可以在這裡添加更多的啟動檢查
+     if not discord_bot_token:
+          logger.critical("Discord bot token is not set!")
+     elif not API_KEY:
+          logger.critical("Gemini API key is not set!")
+     else:
+          logger.info("Starting bot...")
+          bot_run()
+          logger.info("Bot stopped.")
 
 __all__ = ['bot_run', 'bot']
