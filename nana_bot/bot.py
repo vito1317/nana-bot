@@ -491,6 +491,74 @@ def bot_run():
             except Exception as followup_error:
                  logger.error(f"Error sending followup in leave command after unexpected error: {followup_error}")
 
+    async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
+        """Generates and plays TTS audio in the provided voice client."""
+        temp_file_path = None
+        try:
+            if not text or not text.strip():
+                logger.warning(f"[{context}] Skipping TTS for empty text.")
+                return
+
+            logger.info(f"[{context}] Generating TTS for: '{text[:50]}...'")
+
+            tts = await asyncio.to_thread(gTTS, text=text, lang='zh-tw')
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                temp_file_path = fp.name
+                await asyncio.to_thread(tts.write_to_fp, fp)
+                logger.debug(f"[{context}] Temporary TTS file created: {temp_file_path}")
+
+            if not os.path.exists(temp_file_path):
+                logger.error(f"[{context}] Temporary TTS file not found after creation: {temp_file_path}")
+                return
+
+            audio_source = discord.FFmpegPCMAudio(temp_file_path)
+
+            if voice_client.is_playing():
+                logger.info(f"[{context}] Stopping current playback for new TTS.")
+                voice_client.stop()
+                await asyncio.sleep(0.2) # Give some time for stop to take effect
+
+            logger.info(f"[{context}] Playing TTS audio...")
+            voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
+                handle_tts_error(e, temp_file_path, context), bot.loop
+            ).result())
+
+        except gTTS.gTTSError as e:
+            logger.error(f"[{context}] gTTS Error: {e}")
+            if temp_file_path: await remove_temp_file(temp_file_path, context)
+        except discord.errors.ClientException as e:
+            logger.error(f"[{context}] Discord ClientException during TTS playback: {e}")
+            if temp_file_path: await remove_temp_file(temp_file_path, context)
+        except FileNotFoundError:
+             logger.error(f"[{context}] FFmpeg not found. Please install FFmpeg and ensure it's in the system PATH.")
+             await remove_temp_file(temp_file_path, context) # Still try to clean up
+        except Exception as e:
+            logger.exception(f"[{context}] Unexpected error during TTS processing: {e}")
+            if temp_file_path: await remove_temp_file(temp_file_path, context)
+
+    async def remove_temp_file(file_path, context="TTS Cleanup"):
+        """Safely removes the temporary TTS file."""
+        if file_path and os.path.exists(file_path):
+            try:
+                logger.debug(f"[{context}] Attempting to remove temporary file: {file_path}")
+                await asyncio.to_thread(os.remove, file_path)
+                logger.debug(f"[{context}] Successfully removed temporary file: {file_path}")
+            except OSError as e:
+                logger.error(f"[{context}] Error removing temporary file {file_path}: {e}")
+        elif file_path:
+             logger.debug(f"[{context}] Temporary file path provided but file does not exist: {file_path}")
+
+
+    async def handle_tts_error(error, file_path, context="TTS Playback"):
+        """Callback function after TTS playback finishes or errors."""
+        if error:
+            logger.error(f'[{context}] Player error: {error}')
+        else:
+             logger.info(f"[{context}] Playback finished successfully.")
+        await remove_temp_file(file_path, context + " Callback")
+
+
     @bot.event
     async def on_voice_state_update(member, before, after):
         guild_id = member.guild.id
@@ -504,49 +572,8 @@ def bot_run():
         if before.channel != bot_voice_client.channel and after.channel == bot_voice_client.channel:
             user_name = member.display_name
             logger.info(f"User '{user_name}' joined voice channel '{after.channel.name}' where the bot is.")
-
             tts_message = f"{user_name} 加入了語音頻道"
-            temp_file_path = None
-            try:
-                tts = await asyncio.to_thread(gTTS, text=tts_message, lang='zh-tw')
-
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                    temp_file_path = fp.name
-                    await asyncio.to_thread(tts.write_to_fp, fp)
-
-                audio_source = discord.FFmpegPCMAudio(temp_file_path)
-
-                if bot_voice_client.is_playing():
-                    logger.info("Stopping current TTS playback to play join notification.")
-                    bot_voice_client.stop()
-                    await asyncio.sleep(0.1)
-
-                bot_voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
-                    handle_tts_error(e, temp_file_path), bot.loop
-                ).result())
-
-            except gTTS.gTTSError as e:
-                 logger.error(f"gTTS Error generating join notification for {user_name}: {e}")
-                 if temp_file_path and os.path.exists(temp_file_path): await remove_temp_file(temp_file_path)
-            except discord.errors.ClientException as e:
-                 logger.error(f"Discord ClientException playing join notification: {e}")
-                 if temp_file_path and os.path.exists(temp_file_path): await remove_temp_file(temp_file_path)
-            except Exception as e:
-                logger.exception(f"Error playing TTS join notification for {user_name}: {e}")
-                if temp_file_path and os.path.exists(temp_file_path): await remove_temp_file(temp_file_path)
-
-    async def remove_temp_file(file_path):
-        try:
-            await asyncio.sleep(0.2)
-            os.remove(file_path)
-        except OSError as e:
-            logger.error(f"Error removing temporary file {file_path}: {e}")
-
-    async def handle_tts_error(error, file_path):
-        if error:
-            logger.error(f'TTS Player error: {error}')
-        if file_path:
-            await remove_temp_file(file_path)
+            await play_tts(bot_voice_client, tts_message, context="Join Notification")
 
 
     @bot.event
@@ -718,16 +745,17 @@ def bot_run():
         await bot.process_commands(message)
 
         should_respond = False
+        # 確保 TARGET_CHANNEL_ID 是列表或元組
+        target_channels = TARGET_CHANNEL_ID if isinstance(TARGET_CHANNEL_ID, (list, tuple)) else [TARGET_CHANNEL_ID]
+
         if bot.user.mentioned_in(message) and not message.mention_everyone:
              should_respond = True
         elif message.reference and message.reference.resolved:
              if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user:
                   should_respond = True
-        # *** 新增：檢查訊息是否包含 bot_name ***
         elif bot_name and bot_name in message.content:
              should_respond = True
-        # *** 修改：檢查 channel_id 是否在 TARGET_CHANNEL_ID 列表中 ***
-        elif channel_id in TARGET_CHANNEL_ID:
+        elif message.channel.id in target_channels: # 檢查 message.channel.id
              should_respond = True
 
         if should_respond:
@@ -871,42 +899,11 @@ def bot_run():
 
                             guild_voice_client = voice_clients.get(server_id)
                             if guild_voice_client and guild_voice_client.is_connected():
-                                logger.info('Generating TTS for final reply...')
-                                tts_temp_file_path = None
-                                try:
-                                    tts_text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text)
-                                    tts_text = re.sub(r'[*_`~]', '', tts_text)
-                                    tts_text = re.sub(r'<@!?\d+>', '', tts_text)
-                                    tts_text = re.sub(r'<#\d+>', '', tts_text)
-
-                                    if not tts_text.strip():
-                                         logger.info("Skipping TTS for empty text after cleaning.")
-                                    else:
-                                        tts = await asyncio.to_thread(gTTS, text=tts_text, lang='zh-tw')
-                                        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                                            tts_temp_file_path = fp.name
-                                            await asyncio.to_thread(tts.write_to_fp, fp)
-
-                                        audio_source = discord.FFmpegPCMAudio(tts_temp_file_path)
-
-                                        if guild_voice_client.is_playing():
-                                            logger.info("Stopping current TTS playback for new reply.")
-                                            guild_voice_client.stop()
-                                            await asyncio.sleep(0.1)
-
-                                        guild_voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
-                                            handle_tts_error(e, tts_temp_file_path), bot.loop
-                                        ).result())
-
-                                except gTTS.gTTSError as e:
-                                     logger.error(f"gTTS Error generating final reply TTS: {e}")
-                                     if tts_temp_file_path: await remove_temp_file(tts_temp_file_path)
-                                except discord.errors.ClientException as e:
-                                     logger.error(f"Discord ClientException playing final reply TTS: {e}")
-                                     if tts_temp_file_path: await remove_temp_file(tts_temp_file_path)
-                                except Exception as e:
-                                    logger.exception(f"TTS Error for final reply: {e}")
-                                    if tts_temp_file_path: await remove_temp_file(tts_temp_file_path)
+                                tts_text_cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text)
+                                tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
+                                tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
+                                tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
+                                await play_tts(guild_voice_client, tts_text_cleaned, context="AI Reply")
 
 
                     except genai.types.BlockedPromptException as e:
