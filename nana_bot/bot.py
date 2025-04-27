@@ -492,7 +492,6 @@ def bot_run():
                  logger.error(f"Error sending followup in leave command after unexpected error: {followup_error}")
 
     async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
-        """Generates and plays TTS audio in the provided voice client."""
         temp_file_path = None
         try:
             if not text or not text.strip():
@@ -517,7 +516,7 @@ def bot_run():
             if voice_client.is_playing():
                 logger.info(f"[{context}] Stopping current playback for new TTS.")
                 voice_client.stop()
-                await asyncio.sleep(0.2) # Give some time for stop to take effect
+                await asyncio.sleep(0.2)
 
             logger.info(f"[{context}] Playing TTS audio...")
             voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
@@ -532,13 +531,12 @@ def bot_run():
             if temp_file_path: await remove_temp_file(temp_file_path, context)
         except FileNotFoundError:
              logger.error(f"[{context}] FFmpeg not found. Please install FFmpeg and ensure it's in the system PATH.")
-             await remove_temp_file(temp_file_path, context) # Still try to clean up
+             await remove_temp_file(temp_file_path, context)
         except Exception as e:
             logger.exception(f"[{context}] Unexpected error during TTS processing: {e}")
             if temp_file_path: await remove_temp_file(temp_file_path, context)
 
     async def remove_temp_file(file_path, context="TTS Cleanup"):
-        """Safely removes the temporary TTS file."""
         if file_path and os.path.exists(file_path):
             try:
                 logger.debug(f"[{context}] Attempting to remove temporary file: {file_path}")
@@ -551,7 +549,6 @@ def bot_run():
 
 
     async def handle_tts_error(error, file_path, context="TTS Playback"):
-        """Callback function after TTS playback finishes or errors."""
         if error:
             logger.error(f'[{context}] Player error: {error}')
         else:
@@ -745,7 +742,6 @@ def bot_run():
         await bot.process_commands(message)
 
         should_respond = False
-        # 確保 TARGET_CHANNEL_ID 是列表或元組
         target_channels = TARGET_CHANNEL_ID if isinstance(TARGET_CHANNEL_ID, (list, tuple)) else [TARGET_CHANNEL_ID]
 
         if bot.user.mentioned_in(message) and not message.mention_everyone:
@@ -755,7 +751,7 @@ def bot_run():
                   should_respond = True
         elif bot_name and bot_name in message.content:
              should_respond = True
-        elif message.channel.id in target_channels: # 檢查 message.channel.id
+        elif message.channel.id in target_channels:
              should_respond = True
 
         if should_respond:
@@ -855,19 +851,35 @@ def bot_run():
 
                         try:
                              usage_metadata = getattr(response, 'usage_metadata', None)
-                             if usage_metadata and 'total_token_count' in usage_metadata:
-                                 total_token_count = usage_metadata['total_token_count']
-                                 logger.info(f"Total token count from usage_metadata: {total_token_count}")
-                                 update_token_in_db(total_token_count, str(user_id), channel_id)
-                             else:
-                                 if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
-                                     total_token_count = response.candidates[0].token_count
-                                     logger.info(f"Total token count from candidate: {total_token_count}")
+                             # **修正：使用 getattr 訪問屬性**
+                             if usage_metadata and hasattr(usage_metadata, 'total_token_count'):
+                                 total_token_count = getattr(usage_metadata, 'total_token_count', None)
+                                 if total_token_count is not None:
+                                     logger.info(f"Total token count from usage_metadata: {total_token_count}")
                                      update_token_in_db(total_token_count, str(user_id), channel_id)
                                  else:
-                                     logger.warning("Could not find token count in API response.")
+                                     logger.warning("Found usage_metadata but 'total_token_count' attribute is missing or None.")
+                                     # 嘗試備用方案
+                                     if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
+                                         total_token_count = response.candidates[0].token_count
+                                         logger.info(f"Total token count from candidate: {total_token_count}")
+                                         update_token_in_db(total_token_count, str(user_id), channel_id)
+                                     else:
+                                         logger.warning("Could not find token count in usage_metadata or candidate.")
+                             else:
+                                 logger.warning("No usage_metadata found or it lacks 'total_token_count' attribute.")
+                                 # 嘗試備用方案
+                                 if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
+                                     total_token_count = response.candidates[0].token_count
+                                     logger.info(f"Total token count from candidate (fallback): {total_token_count}")
+                                     update_token_in_db(total_token_count, str(user_id), channel_id)
+                                 else:
+                                     logger.warning("Could not find token count in API response via any method.")
+                        except AttributeError as attr_err:
+                             logger.error(f"Attribute error processing token count: {attr_err}. Response structure might have changed.")
                         except Exception as token_error:
                              logger.error(f"Error processing token count: {token_error}")
+
 
                         store_message(user_name, message.content, timestamp)
                         if api_response_text:
