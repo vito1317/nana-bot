@@ -2,7 +2,7 @@
 import asyncio
 import traceback
 import discord
-from discord import app_commands, FFmpegPCMAudio
+from discord import app_commands, FFmpegPCMAudio # FFmpegPCMAudio 可能不再需要，除非用於其他音訊
 from discord.ext import commands, tasks
 from typing import Optional
 import sqlite3
@@ -13,11 +13,11 @@ import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import requests
 from bs4 import BeautifulSoup
-import time
+import time # <--- Import time module
 import re
 import pytz
-from .commands import *
-from nana_bot import (
+from .commands import * # 確保 commands.py 在同一個資料夾或 Python 路徑中
+from nana_bot import ( # 確保 nana_bot.py 在同一個資料夾或 Python 路徑中
     bot,
     bot_name,
     WHITELISTED_SERVERS,
@@ -38,28 +38,40 @@ from nana_bot import (
     default_points
 )
 import os
-import pyttsx3
-import threading
+# import tempfile # 不再需要 gtts 的暫存檔案
+# import shutil # 不再需要 gtts 的暫存檔案
+# from gtts import gTTS # 改用 pyttsx3
+import pyttsx3 # 導入 pyttsx3
+import threading # 用於 threading.Lock 如果需要
 
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.DEBUG, # <--- 確保是 DEBUG
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
+# --- pyttsx3 初始化與鎖 ---
 tts_engine = None
-tts_lock = asyncio.Lock()
+tts_lock = asyncio.Lock() # 使用 asyncio.Lock 來協調異步任務
 
 def init_tts_engine():
     """初始化並配置 pyttsx3 引擎 (只執行一次)"""
     global tts_engine
+    # 不再檢查 tts_engine 是否已存在，允許重新初始化嘗試
+    # if tts_engine is not None:
+    #     logger.debug("TTS engine already initialized.")
+    #     return tts_engine
 
     logger.info("Initializing TTS engine...")
     try:
+        # 指定驅動程式為 espeak，避免在某些系統上預設選到 dummy 驅動
         engine = pyttsx3.init(driverName='espeak')
+        # --- 語音設定 ---
         voices = engine.getProperty('voices')
         selected_voice_id = None
+        # 優先尋找包含 'zh' 或 'chinese' 或 'mandarin' 且 gender 為 female 的聲音
         for voice in voices:
+            # 增加對 voice.languages 的檢查 (如果存在)
             langs = getattr(voice, 'languages', [])
             is_chinese = any(lang in voice.id.lower() for lang in ['zh', 'chinese', 'mandarin']) or \
                         any(lang.lower().startswith('zh') for lang in langs)
@@ -70,6 +82,7 @@ def init_tts_engine():
                     logger.info(f"找到中文女聲: {voice.name} (ID: {voice.id}, Langs: {langs})")
                     break
 
+        # 如果沒找到中文女聲，則尋找任何包含 'zh' 或 'chinese' 或 'mandarin' 的聲音
         if not selected_voice_id:
             for voice in voices:
                 langs = getattr(voice, 'languages', [])
@@ -80,6 +93,7 @@ def init_tts_engine():
                     logger.info(f"找到可能是中文的聲音 (無性別或非女性): {voice.name} (ID: {voice.id}, Langs: {langs})")
                     break
 
+        # 如果還是沒找到，則尋找任何 gender 為 female 的聲音
         if not selected_voice_id:
             for voice in voices:
                 if hasattr(voice, 'gender') and voice.gender == 'female':
@@ -87,32 +101,39 @@ def init_tts_engine():
                     logger.info(f"找到非中文女聲: {voice.name} (ID: {voice.id})")
                     break
 
+        # 設定找到的聲音或使用預設
         if selected_voice_id:
             try:
                 engine.setProperty('voice', selected_voice_id)
                 logger.info(f"已設定 TTS 語音為: {selected_voice_id}")
             except Exception as voice_err:
                 logger.error(f"設定語音 '{selected_voice_id}' 失敗: {voice_err}. 將使用預設聲音。")
-                selected_voice_id = None
+                selected_voice_id = None # 重設 ID，觸發下面的警告
         else:
             logger.warning("找不到任何符合條件的聲音，將使用預設聲音。")
+            # 您可以在這裡印出所有可用的聲音以供調試
+            # logger.debug("Available voices:")
+            # for v in voices: logger.debug(f" - ID: {v.id}, Name: {v.name}, Langs: {getattr(v, 'languages', 'N/A')}, Gender: {getattr(v, 'gender', 'N/A')}")
 
 
+        # --- 語速設定 ---
+        # 獲取當前速率，如果獲取失敗則使用預設值 200
         try:
             rate = engine.getProperty('rate')
         except Exception:
             logger.warning("無法獲取 TTS 引擎當前速率，使用預設值 200。")
             rate = 200
-        engine.setProperty('rate', rate + 50)
+        engine.setProperty('rate', rate + 50) # 加快語速 (例如加快 50)
         logger.info(f"TTS 語速設定為: {engine.getProperty('rate')}")
 
-        tts_engine = engine
+        tts_engine = engine # 將初始化好的引擎賦值給全域變數
         logger.info("TTS engine initialized successfully.")
         return tts_engine
     except Exception as e:
-        logger.error(f"初始化 pyttsx3 引擎失敗: {e}", exc_info=True)
-        tts_engine = None
+        logger.error(f"初始化 pyttsx3 引擎失敗: {e}", exc_info=True) # 記錄詳細錯誤
+        tts_engine = None # 確保初始化失敗時 engine 為 None
         return None
+# --- 結束 pyttsx3 初始化 ---
 
 
 def get_current_time_utc8():
@@ -160,6 +181,8 @@ def bot_run():
 
     @bot.event
     async def on_ready():
+        # 不再在此處初始化 TTS 引擎
+        # init_tts_engine()
 
         if model is None:
             logger.error("AI Model failed to initialize. AI reply functionality will be disabled.")
@@ -210,10 +233,12 @@ def bot_run():
             init_db_on_ready(f"points_{guild.id}.db", points_tables)
 
             try:
-                pass
+                # 同步指令最好只做一次，避免不必要的 API 呼叫
+                pass # 移到 on_ready 最外層
             except Exception as e:
                 logger.exception(f"在 {guild.name} 同步指令時發生未預期的錯誤: {e}")
 
+        # 在所有伺服器處理完畢後，同步一次全域指令
         try:
             synced = await bot.tree.sync()
             logger.info(f"Synced {len(synced)} global commands.")
@@ -462,6 +487,7 @@ def bot_run():
                         return
                     else:
                         try:
+                            # 先停止播放再離開
                             if voice_clients[guild_id].is_playing():
                                 voice_clients[guild_id].stop()
                             await voice_clients[guild_id].disconnect()
@@ -472,7 +498,8 @@ def bot_run():
 
                 try:
                     await interaction.response.defer(ephemeral=True)
-                    voice_client = await channel.connect(timeout=20.0, reconnect=True)
+                    # *** 移除 self_deaf=True ***
+                    voice_client = await channel.connect(timeout=20.0, reconnect=True) # 移除 self_deaf
                     voice_clients[guild_id] = voice_client
                     await interaction.followup.send(f"已加入語音頻道: {channel.name}")
                     logger.info(f"Bot joined voice channel: {channel.name} (ID: {channel.id}) in guild {guild_id}")
@@ -486,9 +513,10 @@ def bot_run():
                     if "Already connected" in str(e):
                         vc = discord.utils.get(bot.voice_clients, guild=interaction.guild)
                         if vc and vc.is_connected():
-                            voice_clients[guild_id] = vc
+                            voice_clients[guild_id] = vc # 更新我們的字典
                             await interaction.followup.send(f"我似乎已經在語音頻道 {vc.channel.name} 中了。", ephemeral=True)
                         else:
+                            # 可能狀態不同步，嘗試強制離開再加入？或者提示使用者手動處理
                             await interaction.followup.send(f"加入語音頻道時發生客戶端錯誤 (可能已連接但狀態未同步): {e}", ephemeral=True)
                     else:
                         await interaction.followup.send(f"加入語音頻道時發生客戶端錯誤: {e}", ephemeral=True)
@@ -518,7 +546,7 @@ def bot_run():
                 await interaction.followup.send(f"處理加入指令時發生未預期的錯誤。", ephemeral=True)
             except discord.errors.NotFound:
                 logger.error("Original interaction for join command not found for followup.")
-            except discord.errors.InteractionResponded:
+            except discord.errors.InteractionResponded: # 修正 InteractionResponded 拼寫錯誤
                 pass
             except Exception as followup_error:
                 logger.error(f"Error sending followup in join command after unexpected error: {followup_error}")
@@ -533,19 +561,20 @@ def bot_run():
             if voice_client and voice_client.is_connected():
                 channel_name = voice_client.channel.name
                 if voice_client.is_playing():
-                    voice_client.stop()
+                    voice_client.stop() # 停止播放再離開
                 await voice_client.disconnect()
-                del voice_clients[guild_id]
+                del voice_clients[guild_id] # 從我們的字典中移除
                 await interaction.response.send_message(f"已離開語音頻道: {channel_name}。")
                 logger.info(f"Bot left voice channel: {channel_name} in guild {guild_id}")
             else:
+                # 檢查 discord.py 的 voice_clients 列表以防狀態不一致
                 vc = discord.utils.get(bot.voice_clients, guild=interaction.guild)
                 if vc and vc.is_connected():
                     channel_name = vc.channel.name
                     if vc.is_playing():
                         vc.stop()
                     await vc.disconnect()
-                    if guild_id in voice_clients:
+                    if guild_id in voice_clients: # 也清理我們的字典
                         del voice_clients[guild_id]
                     await interaction.response.send_message(f"已強制離開語音頻道: {channel_name}。")
                     logger.warning(f"Forcefully disconnected from voice channel {channel_name} in guild {guild_id} due to inconsistency.")
@@ -556,26 +585,31 @@ def bot_run():
             logger.warning("Interaction already responded to in 'leave' command.")
         except discord.errors.HTTPException as e:
             logger.error(f"HTTPException while handling leave command: {e}")
+            # 不需要 followup，因為 response.send_message 應該已經發送或失敗
         except Exception as e:
             logger.exception(f"An unexpected error occurred during leave command: {e}")
             try:
+                # 如果尚未回應，嘗試回應錯誤
                 await interaction.response.send_message(f"處理離開指令時發生未預期的錯誤。", ephemeral=True)
             except discord.errors.InteractionResponded:
-                pass
+                pass # 已經回應過了
             except Exception as followup_error:
                 logger.error(f"Error sending error response in leave command: {followup_error}")
 
+    # --- 修改後的 play_tts 函式 ---
     async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
         """使用 pyttsx3 播放 TTS 語音 (使用鎖和共享引擎)"""
         global tts_engine, tts_lock
 
+        # --- 檢查並嘗試重新初始化引擎 ---
         if tts_engine is None:
             logger.warning(f"[{context}] TTS engine was None. Attempting re-initialization...")
-            if init_tts_engine() is None:
+            if init_tts_engine() is None: # Try to init again
                 logger.error(f"[{context}] Re-initialization failed. Cannot play TTS.")
-                return
+                return # Still failed, give up for this request
             else:
                 logger.info(f"[{context}] TTS engine re-initialized successfully.")
+        # --- 結束檢查 ---
 
 
         if not voice_client or not voice_client.is_connected():
@@ -587,18 +621,22 @@ def bot_run():
             return
 
         logger.info(f"[{context}] Requesting TTS lock for: '{text[:50]}...'")
-        async with tts_lock:
+        async with tts_lock: # 獲取異步鎖
             logger.info(f"[{context}] Acquired TTS lock for: '{text[:50]}...'")
-            if not voice_client.is_connected():
+            if not voice_client.is_connected(): # 再次檢查連接狀態，因為等待鎖時可能已斷開
                 logger.warning(f"[{context}] Voice client disconnected while waiting for lock.")
                 return
 
             try:
+                # 檢查是否正在播放，如果是，則停止 (理論上鎖會阻止這種情況，但多一層保險)
+                # pyttsx3 的 runAndWait 是阻塞的，理論上不需要檢查 is_playing
+                # 但 discord.py 的 voice_client 可能有自己的狀態，保留檢查
                 if voice_client.is_playing():
                     logger.warning(f"[{context}] Voice client was already playing inside lock. Stopping.")
                     voice_client.stop()
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.2) # 短暫等待
 
+                # 在異步線程中執行 blocking 的 pyttsx3 操作，傳入共享的引擎
                 await asyncio.to_thread(run_pyttsx3_speak, tts_engine, text, context)
                 logger.info(f"[{context}] TTS playback initiated via thread for: '{text[:50]}...'")
 
@@ -606,6 +644,7 @@ def bot_run():
                 logger.exception(f"[{context}] Unexpected error during TTS processing initiation: {e}")
             finally:
                 logger.info(f"[{context}] Releasing TTS lock for: '{text[:50]}...'")
+        # 鎖在此處自動釋放
 
 
     def run_pyttsx3_speak(engine: pyttsx3.Engine, text: str, context: str):
@@ -613,18 +652,36 @@ def bot_run():
         if not engine:
             logger.error(f"[{context}] Invalid TTS engine passed to run_pyttsx3_speak.")
             return
+        # *** 擴大 try...except 範圍 ***
         try:
+            # 檢查引擎是否忙碌
+            is_busy = False
+            try:
+                is_busy = engine.isBusy
+                logger.debug(f"[{context}] Engine busy state before say(): {is_busy}")
+            except Exception as busy_err:
+                logger.error(f"[{context}] Error checking engine.isBusy: {busy_err}")
+
+            if is_busy:
+                logger.warning(f"[{context}] Engine reported as busy before say(). Skipping.")
+                # 可以選擇停止引擎，但可能導致其他問題
+                # engine.stop()
+                return
+
             logger.debug(f"[{context}] Using shared pyttsx3 engine. Calling engine.say().")
             engine.say(text)
             logger.debug(f"[{context}] engine.say() called. Calling engine.runAndWait().")
-            engine.runAndWait()
+            engine.runAndWait() # 這個會阻塞當前線程直到說完
             logger.debug(f"[{context}] engine.runAndWait() finished.")
-            time.sleep(0.1)
+            # 保持延遲，以防萬一
+            time.sleep(0.1) # Add a small delay (e.g., 100ms)
             logger.debug(f"[{context}] Delay finished after runAndWait.")
         except RuntimeError as rt_err:
-            logger.error(f"[{context}] RuntimeError during pyttsx3 speak: {rt_err}")
+            # 捕捉可能的 RuntimeError，例如事件循環已停止或引擎狀態錯誤
+            logger.error(f"[{context}] RuntimeError during pyttsx3 speak: {rt_err}", exc_info=True)
         except Exception as e:
             logger.error(f"[{context}] Error during pyttsx3 speak: {e}", exc_info=True)
+        # 不需要在 finally 中停止引擎，因為它是共享的
 
 
     @bot.event
@@ -632,18 +689,23 @@ def bot_run():
         guild_id = member.guild.id
         bot_voice_client = voice_clients.get(guild_id)
 
+        # 確保機器人已連接且事件不是由機器人自己觸發
         if not bot_voice_client or not bot_voice_client.is_connected() or member.id == bot.user.id:
             return
 
+        # 檢查是否有人加入機器人所在的頻道
         if before.channel != bot_voice_client.channel and after.channel == bot_voice_client.channel:
             user_name = member.display_name
             logger.info(f"User '{user_name}' joined voice channel '{after.channel.name}' where the bot is.")
             tts_message = f"{user_name} 加入了語音頻道"
+            # 呼叫更新後的 play_tts
             await play_tts(bot_voice_client, tts_message, context="Join Notification")
+        # 處理離開事件
         elif before.channel == bot_voice_client.channel and after.channel != bot_voice_client.channel:
             user_name = member.display_name
             logger.info(f"User '{user_name}' left voice channel '{before.channel.name}' where the bot was.")
             tts_message = f"{user_name} 離開了語音頻道"
+            # 呼叫更新後的 play_tts
             await play_tts(bot_voice_client, tts_message, context="Leave Notification")
 
 
@@ -654,9 +716,11 @@ def bot_run():
 
         server_id = message.guild.id if message.guild else None
         if not server_id:
-            return
+            return # 忽略私訊或無伺服器來源的訊息
 
+        # 檢查 AI 模型是否可用
         if model is None:
+            # 只有在被提及或在目標頻道時才記錄警告，避免洗版
             target_channels_check = []
             if isinstance(TARGET_CHANNEL_ID, (list, tuple)):
                 target_channels_check = [str(cid) for cid in TARGET_CHANNEL_ID]
@@ -664,6 +728,7 @@ def bot_run():
                 target_channels_check = [str(TARGET_CHANNEL_ID)]
             if bot.user.mentioned_in(message) or (target_channels_check and str(message.channel.id) in target_channels_check):
                 logger.warning("AI Model not available, cannot process message.")
+            # 無論如何都要返回，因為 AI 功能無法使用
             return
 
         user_name = message.author.display_name or message.author.name
@@ -671,13 +736,16 @@ def bot_run():
         timestamp = get_current_time_utc8()
         channel_id = str(message.channel.id)
 
+        # --- 資料庫路徑設定 ---
         db_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases")
-        os.makedirs(db_base_path, exist_ok=True)
+        os.makedirs(db_base_path, exist_ok=True) # 確保資料夾存在
         analytics_db_path = os.path.join(db_base_path, f"analytics_server_{server_id}.db")
         chat_db_path = os.path.join(db_base_path, f"messages_chat_{server_id}.db")
         points_db_path = os.path.join(db_base_path, f'points_{server_id}.db')
 
+        # --- 資料庫操作函式 (保持不變) ---
         def init_db(db_filename, tables=None):
+            # ... (省略內部實作)
             db_full_path = os.path.join(db_base_path, db_filename)
             if os.path.exists(db_full_path) and os.path.getsize(db_full_path) == 0:
                 logger.warning(f"Database file {db_full_path} exists but is empty. Deleting...")
@@ -697,10 +765,12 @@ def bot_run():
                 if conn: conn.close()
 
         def update_user_message_count(user_id_str, user_name_str, join_date_iso):
+            # ... (省略內部實作)
             conn = None
             try:
                 conn = sqlite3.connect(analytics_db_path, timeout=10)
                 c = conn.cursor()
+                # 確保 users 表存在
                 c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)")
                 c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id_str,))
                 result = c.fetchone()
@@ -708,13 +778,14 @@ def bot_run():
                     c.execute("UPDATE users SET message_count = message_count + 1, user_name = ? WHERE user_id = ?", (user_name_str, user_id_str))
                 else:
                     join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-                    c.execute("INSERT OR IGNORE INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1))
+                    c.execute("INSERT OR IGNORE INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1)) # 使用 INSERT OR IGNORE 避免重複插入
                 conn.commit()
             except sqlite3.Error as e: logger.exception(f"Database error in update_user_message_count for user {user_id_str}: {e}")
             finally:
                 if conn: conn.close()
 
         def update_token_in_db(total_token_count, userid_str, channelid_str):
+            # ... (省略內部實作)
             if not total_token_count or not userid_str or not channelid_str:
                 logger.warning("Missing data for update_token_in_db: tokens=%s, user=%s, channel=%s", total_token_count, userid_str, channelid_str)
                 return
@@ -722,6 +793,7 @@ def bot_run():
             try:
                 conn = sqlite3.connect(analytics_db_path, timeout=10)
                 c = conn.cursor()
+                # 確保 metadata 表存在
                 c.execute("""CREATE TABLE IF NOT EXISTS metadata (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             userid TEXT UNIQUE,
@@ -734,11 +806,13 @@ def bot_run():
                 if conn: conn.close()
 
         def store_message(user_str, content_str, timestamp_str):
+            # ... (省略內部實作)
             if not content_str: return
             conn = None
             try:
                 conn = sqlite3.connect(chat_db_path, timeout=10)
                 c = conn.cursor()
+                # 確保 message 表存在
                 c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
                 c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
                 c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
@@ -748,12 +822,13 @@ def bot_run():
                 if conn: conn.close()
 
         def get_chat_history():
+            # ... (省略內部實作)
             conn = None
             try:
                 conn = sqlite3.connect(chat_db_path, timeout=10)
                 c = conn.cursor()
                 c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
-                c.execute("DELETE FROM message WHERE content IS NULL OR content = ''")
+                c.execute("DELETE FROM message WHERE content IS NULL OR content = ''") # 清理空訊息
                 conn.commit()
                 c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
                 rows = c.fetchall()
@@ -764,24 +839,27 @@ def bot_run():
             return []
 
         def get_user_points(user_id_str, user_name_str=None, join_date_iso=None):
+            # ... (省略內部實作)
             conn = None
             try:
                 conn = sqlite3.connect(points_db_path, timeout=10)
                 cursor = conn.cursor()
+                # 確保 users 表存在
                 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT " + str(default_points) + ")")
                 cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
                 result = cursor.fetchone()
                 if result: return int(result[0])
-                elif default_points >= 0 and user_name_str:
+                elif default_points >= 0 and user_name_str: # 允許 default_points 為 0
                     join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
                     logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB. Creating with {default_points} points.")
-                    cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
+                    cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points)) # 使用 IGNORE
+                    # 確保 transactions 表存在
                     cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
-                    if default_points > 0:
+                    if default_points > 0: # 只有點數大於 0 才記錄交易
                         cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
                     conn.commit()
                     return default_points
-                else: return 0
+                else: return 0 # 如果 default_points < 0 或缺少 user_name
             except sqlite3.Error as e: logger.exception(f"Database error in get_user_points for user {user_id_str}: {e}")
             except ValueError: logger.error(f"Value error converting points for user {user_id_str}.")
             finally:
@@ -789,24 +867,29 @@ def bot_run():
             return 0
 
         def deduct_points(user_id_str, points_to_deduct):
-            if points_to_deduct <= 0: return get_user_points(user_id_str)
+            # ... (省略內部實作)
+            if points_to_deduct <= 0: return get_user_points(user_id_str) # 如果不需扣點，直接返回當前點數
             conn = None
             try:
                 conn = sqlite3.connect(points_db_path, timeout=10)
                 cursor = conn.cursor()
+                # 確保表存在
                 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT " + str(default_points) + ")")
                 cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
 
+                # 使用 SELECT FOR UPDATE 或類似機制來處理並發問題（SQLite 本身有文件級鎖定）
+                # 但為確保數據一致性，先讀取再寫入
                 cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
                 result = cursor.fetchone()
                 if not result:
                     logger.warning(f"User {user_id_str} not found in points DB for deduction. Cannot deduct points.")
-                    return 0
+                    # 可以選擇創建用戶或直接返回 0
+                    return 0 # 或者 get_user_points(user_id_str) 如果希望創建用戶
 
                 current_points = int(result[0])
                 if current_points < points_to_deduct:
                     logger.warning(f"User {user_id_str} has insufficient points ({current_points}) to deduct {points_to_deduct}.")
-                    return current_points
+                    return current_points # 返回當前點數，不扣除
 
                 new_points = current_points - points_to_deduct
                 cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, user_id_str))
@@ -817,12 +900,16 @@ def bot_run():
             except sqlite3.Error as e: logger.exception(f"Database error in deduct_points for user {user_id_str}: {e}")
             finally:
                 if conn: conn.close()
+            # 出錯時返回扣點前的點數 (或 0 如果用戶不存在)
             return get_user_points(user_id_str)
+        # --- 結束資料庫操作函式 ---
 
+        # --- 訊息記錄 ---
         conn_analytics = None
         try:
             conn_analytics = sqlite3.connect(analytics_db_path, timeout=10)
             c_analytics = conn_analytics.cursor()
+            # 確保 messages 表存在
             c_analytics.execute("CREATE TABLE IF NOT EXISTS messages (message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)")
             c_analytics.execute("INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) VALUES (?, ?, ?, ?, ?)", (str(user_id), user_name, channel_id, message.created_at.replace(tzinfo=None).isoformat(), message.content))
             conn_analytics.commit()
@@ -830,6 +917,7 @@ def bot_run():
         finally:
             if conn_analytics: conn_analytics.close()
 
+        # 更新使用者發言次數
         join_date_iso = None
         if isinstance(message.author, discord.Member) and message.author.joined_at:
             try:
@@ -837,51 +925,67 @@ def bot_run():
             except Exception as e: logger.error(f"Error converting join date for user {user_id}: {e}")
         update_user_message_count(str(user_id), user_name, join_date_iso)
 
+        # 處理可能的指令 (如果 bot 設定了 command_prefix)
+        # 注意：如果主要使用 slash commands，這部分可能不是必需的
         if hasattr(bot, 'command_prefix') and bot.command_prefix and message.content.startswith(bot.command_prefix):
             await bot.process_commands(message)
+            # 檢查指令是否被處理，如果處理了就不需要 AI 回應
             ctx = await bot.get_context(message)
             if ctx.command:
                 return
 
+        # --- 判斷是否需要 AI 回應 ---
         should_respond = False
         target_channels = []
+        # 確保 TARGET_CHANNEL_ID 是列表或元組
         if isinstance(TARGET_CHANNEL_ID, (list, tuple)):
             target_channels = [str(cid) for cid in TARGET_CHANNEL_ID]
         elif isinstance(TARGET_CHANNEL_ID, (str, int)):
             target_channels = [str(TARGET_CHANNEL_ID)]
 
+        # 1. 被 @ 提及 (且不是 @everyone/@here)
         if bot.user.mentioned_in(message) and not message.mention_everyone:
             should_respond = True
             logger.debug(f"Responding because bot was mentioned by {user_name}")
+        # 2. 回覆機器人的訊息
         elif message.reference and message.reference.resolved:
+            # 確保 resolved 是 Message 物件
             if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user:
                 should_respond = True
                 logger.debug(f"Responding because user replied to bot's message")
+        # 3. 訊息包含機器人名字 (如果 bot_name 有設定且不為空)
         elif bot_name and bot_name in message.content:
             should_respond = True
             logger.debug(f"Responding because bot name '{bot_name}' was mentioned")
+        # 4. 在指定的目標頻道
         elif channel_id in target_channels:
             should_respond = True
             logger.debug(f"Responding because message is in target channel {channel_id}")
 
+        # --- AI 回應處理 ---
         if should_respond:
+            # 檢查伺服器白名單
             if message.guild and message.guild.id not in WHITELISTED_SERVERS:
                 logger.info(f"Ignoring message from non-whitelisted server: {message.guild.name} ({message.guild.id})")
                 return
 
+            # 檢查點數
             user_points = get_user_points(str(user_id), user_name, join_date_iso)
             if Point_deduction_system > 0 and user_points < Point_deduction_system:
                 try:
                     await message.reply(f"抱歉，您的點數 ({user_points}) 不足以支付本次互動所需的 {Point_deduction_system} 點。", mention_author=False)
                     logger.info(f"User {user_name} ({user_id}) has insufficient points ({user_points}/{Point_deduction_system})")
                 except discord.HTTPException as e: logger.error(f"Error replying about insufficient points: {e}")
-                return
+                return # 點數不足，停止處理
 
+            # 顯示"正在輸入..."狀態
             async with message.channel.typing():
                 try:
+                    # 扣除點數
                     if Point_deduction_system > 0:
                         deduct_points(str(user_id), Point_deduction_system)
 
+                    # --- Gemini AI 互動 ---
                     initial_prompt = (
                         f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。"
                         f"她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，"
@@ -919,8 +1023,9 @@ def bot_run():
                     if chat_history_raw:
                         for row in chat_history_raw:
                             db_user, db_content, db_timestamp = row
-                            if db_content:
+                            if db_content: # 確保內容不為空
                                 role = "user" if db_user != bot_name else "model"
+                                # 歷史訊息格式調整：使用者訊息包含時間和名稱，模型訊息只包含內容
                                 message_text = f"{db_timestamp} {db_user}: {db_content}" if role == "user" else db_content
                                 chat_history_processed.append({"role": role, "parts": [{"text": message_text}]})
                             else:
@@ -932,15 +1037,18 @@ def bot_run():
                         logger.debug("--- End Chat History ---")
                         logger.debug(f"Current User Message: {message.content}")
 
+                    # 開始聊天會話
                     chat = model.start_chat(history=chat_history_processed)
+                    # 當前使用者訊息也加入時間戳和名稱
                     current_user_message = f"{timestamp} {user_name}: {message.content}"
                     api_response_text = ""
 
                     try:
+                        # 發送訊息給 Gemini API
                         response = await chat.send_message_async(
                             current_user_message,
-                            stream=False,
-                            safety_settings={
+                            stream=False, # 非流式傳輸
+                            safety_settings={ # 設定安全閾值
                                 HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
                                 HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
                                 HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
@@ -948,15 +1056,19 @@ def bot_run():
                             },
                         )
 
+                        # 檢查是否有被阻擋
                         if response.prompt_feedback and response.prompt_feedback.block_reason:
                             block_reason = response.prompt_feedback.block_reason
                             logger.warning(f"Gemini API blocked prompt for user {user_id}. Reason: {block_reason}")
                             await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
-                            return
+                            return # 被阻擋，停止處理
 
+                        # 檢查是否有候選回應
                         if not response.candidates:
+                            # 檢查是否有完成原因 (例如安全設定)
                             finish_reason = 'UNKNOWN'
                             try:
+                                # 嘗試安全地訪問 finish_reason
                                 if response.candidates and len(response.candidates) > 0:
                                     finish_reason = getattr(response.candidates[0], 'finish_reason', 'UNKNOWN')
                                 else:
@@ -965,15 +1077,18 @@ def bot_run():
                                 logger.error(f"Error accessing finish_reason: {fr_err}")
 
                             logger.warning(f"No candidates returned from Gemini API for user {user_id}. Finish Reason: {finish_reason}")
+                            # 根據原因給出更具體的提示
                             if finish_reason == 'SAFETY':
                                 await message.reply("抱歉，我無法產生包含不當內容的回應。", mention_author=False)
                             else:
                                 await message.reply("抱歉，我暫時無法產生回應，請稍後再試。", mention_author=False)
-                            return
+                            return # 沒有回應，停止處理
 
+                        # 提取回應文字
                         api_response_text = response.text.strip()
-                        logger.info(f"Gemini API response for user {user_id}: {api_response_text[:100]}...")
+                        logger.info(f"Gemini API response for user {user_id}: {api_response_text[:100]}...") # 只記錄前 100 字
 
+                        # --- Token 計算與記錄 ---
                         try:
                             usage_metadata = getattr(response, 'usage_metadata', None)
                             total_token_count = None
@@ -986,6 +1101,7 @@ def bot_run():
                             else:
                                 logger.warning("No usage_metadata found or it lacks 'total_token_count' attribute.")
 
+                            # 備用方案：從 candidate 獲取
                             if total_token_count is None and response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
                                 total_token_count = response.candidates[0].token_count
                                 logger.info(f"Total token count from candidate (fallback): {total_token_count}")
@@ -998,61 +1114,76 @@ def bot_run():
                             logger.error(f"Attribute error processing token count: {attr_err}. Response structure might have changed.")
                         except Exception as token_error:
                             logger.error(f"Error processing token count: {token_error}")
+                        # --- 結束 Token 計算 ---
 
+                        # 儲存使用者訊息和 AI 回應到歷史記錄
                         store_message(user_name, message.content, timestamp)
                         if api_response_text:
-                            store_message(bot_name, api_response_text, timestamp)
+                            store_message(bot_name, api_response_text, timestamp) # 儲存模型的回應
 
+                        # --- 發送回應給 Discord ---
                         if api_response_text:
+                            # 檢查回應長度
                             if len(api_response_text) > 2000:
                                 logger.warning(f"API reply exceeds 2000 characters ({len(api_response_text)}). Splitting.")
                                 parts = []
                                 current_part = ""
                                 for line in api_response_text.split('\n'):
+                                    # 檢查加上新行後是否超過限制
                                     if len(current_part) + len(line) + 1 < 2000:
                                         current_part += line + "\n"
                                     else:
+                                        # 如果當前部分不為空，先添加到列表
                                         if current_part:
                                             parts.append(current_part)
+                                        # 新行作為新的部分開始
+                                        # 如果單行就超過限制，需要進一步處理（此處簡化為直接添加）
                                         if len(line) + 1 >= 2000:
                                             logger.warning(f"Single line exceeds 2000 chars, sending as is: {line[:50]}...")
-                                            parts.append(line[:1999] + "\n")
-                                            current_part = ""
+                                            parts.append(line[:1999] + "\n") # 截斷
+                                            current_part = "" # 清空當前部分
                                         else:
                                             current_part = line + "\n"
+                                # 添加最後一部分
                                 if current_part:
                                     parts.append(current_part)
 
                                 first_part = True
                                 for part in parts:
                                     part_to_send = part.strip()
-                                    if not part_to_send: continue
+                                    if not part_to_send: continue # 跳過空部分
                                     if first_part:
                                         await message.reply(part_to_send, mention_author=False)
                                         first_part = False
                                     else:
                                         await message.channel.send(part_to_send)
-                                    await asyncio.sleep(0.5)
+                                    await asyncio.sleep(0.5) # 避免速率限制
                             else:
+                                # 長度正常，直接回覆
                                 await message.reply(api_response_text, mention_author=False)
 
+                            # --- TTS 播放 ---
                             guild_voice_client = voice_clients.get(server_id)
                             if guild_voice_client and guild_voice_client.is_connected():
-                                tts_text_cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text)
-                                tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
-                                tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
-                                tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
-                                tts_text_cleaned = re.sub(r'http[s]?://\S+', '', tts_text_cleaned)
-                                tts_text_cleaned = tts_text_cleaned.strip()
+                                # 清理文字以獲得更好的 TTS 效果
+                                tts_text_cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text) # 移除 Markdown 連結語法，保留文字
+                                tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned) # 移除 Markdown 格式符號
+                                tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned) # 移除 @user
+                                tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned) # 移除 #channel
+                                tts_text_cleaned = re.sub(r'http[s]?://\S+', '', tts_text_cleaned) # 移除 URL
+                                tts_text_cleaned = tts_text_cleaned.strip() # 去除首尾空白
 
-                                if tts_text_cleaned:
+                                if tts_text_cleaned: # 確保清理後還有內容
                                     await play_tts(guild_voice_client, tts_text_cleaned, context="AI Reply")
                                 else:
                                     logger.info("Skipping TTS for AI reply after cleaning resulted in empty text.")
                         else:
                             logger.warning(f"Gemini API returned empty text response for user {user_id}.")
+                            # 可以選擇性地回覆一個通用訊息
+                            # await message.reply("抱歉，我無法產生有效的回應。", mention_author=False)
 
 
+                    # --- Gemini API 錯誤處理 ---
                     except genai.types.BlockedPromptException as e:
                         logger.warning(f"Gemini API blocked prompt (send_message) for user {user_id}: {e}")
                         await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
@@ -1060,56 +1191,78 @@ def bot_run():
                         logger.warning(f"Gemini API stopped candidate generation (send_message) for user {user_id}: {e}")
                         await message.reply("抱歉，產生回應時被中斷，請稍後再試。", mention_author=False)
                     except Exception as e:
+                        # 捕獲與 Gemini API 相關的其他錯誤
                         logger.exception(f"Error during Gemini API interaction for user {user_id}: {e}")
                         await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
+                    # --- 結束 Gemini API 互動 ---
 
+                # --- Discord API 錯誤處理 ---
                 except discord.errors.HTTPException as e:
-                    if e.status == 403:
+                    if e.status == 403: # Forbidden
                         logger.error(f"Permission error (403) in channel {message.channel.id} or for user {message.author.id}: {e.text}")
                         try:
+                            # 嘗試私訊使用者告知權限問題
                             await message.author.send(f"我在頻道 <#{message.channel.id}> 中似乎缺少回覆訊息的權限，請檢查設定。")
                         except discord.errors.Forbidden:
                             logger.error(f"Failed to DM user {message.author.id} about permission error.")
                     else:
                         logger.exception(f"HTTPException occurred while processing message for user {user_id}: {e}")
+                        # 可以在此處回覆一個通用錯誤訊息，但要小心無限循環
+                        # await message.reply("處理您的訊息時發生網路錯誤。", mention_author=False)
+                # --- 其他未預期錯誤處理 ---
                 except Exception as e:
                     logger.exception(f"An unexpected error occurred in on_message processing for user {user_id}: {e}")
                     try:
                         await message.reply("處理您的訊息時發生未預期的錯誤。", mention_author=False)
                     except Exception as reply_err:
                         logger.error(f"Failed to send error reply message: {reply_err}")
+            # --- 結束 async with message.channel.typing() ---
+    # --- 結束 on_message 事件 ---
 
 
+    # --- Bot 啟動 ---
     try:
         if not discord_bot_token:
             raise ValueError("Discord bot token is not configured.")
+        # 使用日誌記錄器啟動 Bot，而不是 print
         logger.info("Attempting to start the bot...")
-        bot.run(discord_bot_token, log_handler=None)
+        # 不再在此處檢查 TTS 引擎，因為它在 __main__ 中初始化
+        # if tts_engine is None:
+        #      logger.warning("TTS engine failed to initialize before bot run. TTS will not work.")
+        bot.run(discord_bot_token, log_handler=None) # 禁用 discord.py 預設的日誌處理程序
     except discord.errors.LoginFailure:
         logger.critical("Login Failed: Invalid Discord Token provided.")
     except discord.HTTPException as e:
+        # 這通常表示網路問題或 Discord API 問題
         logger.critical(f"Failed to connect to Discord: {e}")
     except Exception as e:
-        logger.critical(f"Critical error running the bot: {e}", exc_info=True)
+        # 捕獲所有其他可能的啟動錯誤
+        logger.critical(f"Critical error running the bot: {e}", exc_info=True) # 使用 exc_info=True 記錄 traceback
     finally:
         logger.info("Bot process has stopped.")
+        # 可以在這裡添加清理程式碼，例如關閉資料庫連接或停止 TTS 引擎 (如果 pyttsx3 支援)
+        # pyttsx3 的 stop() 可能不安全或無效，所以通常不調用
+# --- 結束 bot_run 函式 ---
 
 
 if __name__ == "__main__":
+    # 檢查必要的配置
     if not discord_bot_token:
         logger.critical("Discord bot token is not set! Bot cannot start.")
     elif not API_KEY:
         logger.critical("Gemini API key is not set! AI features will be disabled.")
     else:
+        # 在啟動 Bot 前先初始化 TTS 引擎
         logger.info("Initializing TTS engine before starting bot...")
-        init_tts_engine()
+        init_tts_engine() # 呼叫初始化函式
         if tts_engine is None:
             logger.warning("TTS engine failed to initialize. TTS functionality will be unavailable.")
         else:
             logger.info("TTS engine initialized successfully before bot start.")
 
         logger.info("Starting bot from main execution block...")
-        bot_run()
+        bot_run() # 呼叫主執行函式
         logger.info("Bot execution finished.")
 
+# 匯出 bot_run 和 bot 物件 (如果需要從其他模組導入)
 __all__ = ['bot_run', 'bot']
