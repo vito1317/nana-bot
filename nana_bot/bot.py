@@ -59,30 +59,39 @@ def init_tts_engine():
 
     logger.info("Initializing TTS engine...")
     try:
-        engine = pyttsx3.init()
+        engine = pyttsx3.init(driverName='espeak')
         voices = engine.getProperty('voices')
-        female_voice_id = None
+        selected_voice_id = None
         for voice in voices:
-             if any(lang in voice.id.lower() for lang in ['mandarin', 'chinese', 'zh']):
+            if any(lang in voice.id.lower() for lang in ['zh', 'chinese', 'mandarin']):
                  if hasattr(voice, 'gender') and voice.gender == 'female':
-                     female_voice_id = voice.id
+                     selected_voice_id = voice.id
                      logger.info(f"找到中文女聲: {voice.name} (ID: {voice.id})")
                      break
-                 elif female_voice_id is None:
-                      female_voice_id = voice.id
-                      logger.info(f"找到可能是中文的聲音 (無性別或非女性): {voice.name} (ID: {voice.id})")
 
+        if not selected_voice_id:
+            for voice in voices:
+                 if any(lang in voice.id.lower() for lang in ['zh', 'chinese', 'mandarin']):
+                     selected_voice_id = voice.id
+                     logger.info(f"找到可能是中文的聲音 (無性別或非女性): {voice.name} (ID: {voice.id})")
+                     break
 
-        if female_voice_id:
+        if not selected_voice_id:
+             for voice in voices:
+                 if hasattr(voice, 'gender') and voice.gender == 'female':
+                     selected_voice_id = voice.id
+                     logger.info(f"找到非中文女聲: {voice.name} (ID: {voice.id})")
+                     break
+
+        if selected_voice_id:
             try:
-                engine.setProperty('voice', female_voice_id)
-                logger.info(f"已設定 TTS 語音為: {female_voice_id}")
+                engine.setProperty('voice', selected_voice_id)
+                logger.info(f"已設定 TTS 語音為: {selected_voice_id}")
             except Exception as voice_err:
-                logger.error(f"設定語音 '{female_voice_id}' 失敗: {voice_err}. 將使用預設聲音。")
-                female_voice_id = None
-
-        if not female_voice_id:
-            logger.warning("找不到或無法設定指定的中文女聲，將使用預設聲音。")
+                logger.error(f"設定語音 '{selected_voice_id}' 失敗: {voice_err}. 將使用預設聲音。")
+                selected_voice_id = None
+        else:
+             logger.warning("找不到任何符合條件的聲音，將使用預設聲音。")
 
 
         rate = engine.getProperty('rate')
@@ -143,7 +152,6 @@ def bot_run():
 
     @bot.event
     async def on_ready():
-        init_tts_engine()
 
         if model is None:
              logger.error("AI Model failed to initialize. AI reply functionality will be disabled.")
@@ -502,7 +510,7 @@ def bot_run():
                 await interaction.followup.send(f"處理加入指令時發生未預期的錯誤。", ephemeral=True)
             except discord.errors.NotFound:
                  logger.error("Original interaction for join command not found for followup.")
-            except discord.errors.InteractionResponded:
+            except discord.errors.InteractionResponडेड:
                  pass
             except Exception as followup_error:
                  logger.error(f"Error sending followup in join command after unexpected error: {followup_error}")
@@ -555,8 +563,7 @@ def bot_run():
 
         if tts_engine is None:
             logger.error(f"[{context}] TTS engine is not initialized. Cannot play TTS.")
-            if init_tts_engine() is None:
-                 return
+            return
 
         if not voice_client or not voice_client.is_connected():
             logger.warning(f"[{context}] Voice client not connected, cannot play TTS.")
@@ -634,7 +641,12 @@ def bot_run():
              return
 
         if model is None:
-             if bot.user.mentioned_in(message) or (TARGET_CHANNEL_ID and str(message.channel.id) in TARGET_CHANNEL_ID):
+             target_channels_check = []
+             if isinstance(TARGET_CHANNEL_ID, (list, tuple)):
+                 target_channels_check = [str(cid) for cid in TARGET_CHANNEL_ID]
+             elif isinstance(TARGET_CHANNEL_ID, (str, int)):
+                 target_channels_check = [str(TARGET_CHANNEL_ID)]
+             if bot.user.mentioned_in(message) or (target_channels_check and str(message.channel.id) in target_channels_check):
                   logger.warning("AI Model not available, cannot process message.")
              return
 
@@ -673,6 +685,7 @@ def bot_run():
             try:
                 conn = sqlite3.connect(analytics_db_path, timeout=10)
                 c = conn.cursor()
+                c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)")
                 c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id_str,))
                 result = c.fetchone()
                 if result:
@@ -808,9 +821,11 @@ def bot_run():
             except Exception as e: logger.error(f"Error converting join date for user {user_id}: {e}")
         update_user_message_count(str(user_id), user_name, join_date_iso)
 
-        if hasattr(bot, 'command_prefix') and message.content.startswith(bot.command_prefix):
+        if hasattr(bot, 'command_prefix') and bot.command_prefix and message.content.startswith(bot.command_prefix):
              await bot.process_commands(message)
-             return
+             ctx = await bot.get_context(message)
+             if ctx.command:
+                 return
 
         should_respond = False
         target_channels = []
@@ -924,7 +939,15 @@ def bot_run():
                              return
 
                         if not response.candidates:
-                            finish_reason = getattr(response, 'candidates[0].finish_reason', 'UNKNOWN') if response.candidates else 'NO_CANDIDATES'
+                            finish_reason = 'UNKNOWN'
+                            try:
+                                if response.candidates and len(response.candidates) > 0:
+                                     finish_reason = getattr(response.candidates[0], 'finish_reason', 'UNKNOWN')
+                                else:
+                                     finish_reason = 'NO_CANDIDATES'
+                            except Exception as fr_err:
+                                 logger.error(f"Error accessing finish_reason: {fr_err}")
+
                             logger.warning(f"No candidates returned from Gemini API for user {user_id}. Finish Reason: {finish_reason}")
                             if finish_reason == 'SAFETY':
                                  await message.reply("抱歉，我無法產生包含不當內容的回應。", mention_author=False)
@@ -1045,8 +1068,6 @@ def bot_run():
         if not discord_bot_token:
              raise ValueError("Discord bot token is not configured.")
         logger.info("Attempting to start the bot...")
-        if tts_engine is None:
-             logger.warning("TTS engine failed to initialize before bot run. TTS will not work.")
         bot.run(discord_bot_token, log_handler=None)
     except discord.errors.LoginFailure:
         logger.critical("Login Failed: Invalid Discord Token provided.")
@@ -1064,6 +1085,13 @@ if __name__ == "__main__":
      elif not API_KEY:
           logger.critical("Gemini API key is not set! AI features will be disabled.")
      else:
+          logger.info("Initializing TTS engine before starting bot...")
+          init_tts_engine()
+          if tts_engine is None:
+               logger.warning("TTS engine failed to initialize. TTS functionality will be unavailable.")
+          else:
+               logger.info("TTS engine initialized successfully before bot start.")
+
           logger.info("Starting bot from main execution block...")
           bot_run()
           logger.info("Bot execution finished.")
