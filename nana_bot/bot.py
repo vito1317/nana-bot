@@ -40,6 +40,12 @@ from nana_bot import (
 import os
 import pyttsx3
 import threading
+import torch, os, io
+from typing import Union, IO, Any
+if not hasattr(torch.serialization, "FILE_LIKE"):
+    file_like_type = getattr(torch.serialization, "FileLike", Union[str, os.PathLike, IO[bytes]])
+    setattr(torch.serialization, "FILE_LIKE", file_like_type)
+
 import ChatTTS
 import tempfile, os, asyncio
 import torch, torchaudio
