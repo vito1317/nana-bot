@@ -584,7 +584,7 @@ def bot_run():
             except Exception as followup_error:
                 logger.error(f"Error sending error response in leave command: {followup_error}")
 
-    async def play_tts(voice_client, text: str):
+    async def play_tts(voice_client, text: str, context: str = None):
         # 1. 生成 wav 陣列 (shape: [T,])
         wavs = chat_tts.infer([text])       # 單句模式也可傳 list :contentReference[oaicite:6]{index=6}
         wav = wavs[0]
