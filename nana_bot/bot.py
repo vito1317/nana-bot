@@ -60,6 +60,9 @@ def init_tts_engine():
         engine = pyttsx3.init(driverName='espeak')
         voices = engine.getProperty('voices')
         selected_voice_id = 'zh'
+        for v in engine.getProperty('voices'):
+            print(v.id, v.name)
+
         '''
         for voice in voices:
             langs = getattr(voice, 'languages', [])
