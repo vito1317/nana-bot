@@ -56,7 +56,7 @@ from discord import FFmpegPCMAudio
 #chat_tts = ChatTTS.Chat()
 #chat_tts.load(compile=False)
 
-DEFAULT_VOICE = "zh-TW-YunRuNeural"
+DEFAULT_VOICE = "zh-TW-HsiaoChenNeural"  
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
