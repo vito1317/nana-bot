@@ -59,7 +59,8 @@ def init_tts_engine():
     try:
         engine = pyttsx3.init(driverName='espeak')
         voices = engine.getProperty('voices')
-        selected_voice_id = None
+        selected_voice_id = 'mb-cn1'
+        '''
         for voice in voices:
             langs = getattr(voice, 'languages', [])
             is_chinese = any(lang in voice.id.lower() for lang in ['zh', 'chinese', 'mandarin']) or \
@@ -70,7 +71,7 @@ def init_tts_engine():
                     selected_voice_id = voice.id
                     logger.info(f"找到中文女聲: {voice.name} (ID: {voice.id}, Langs: {langs})")
                     break
-
+        '''
         if not selected_voice_id:
             for voice in voices:
                 langs = getattr(voice, 'languages', [])
