@@ -1,4 +1,3 @@
-# coding=utf-8
 import asyncio
 import traceback
 import discord
@@ -47,7 +46,8 @@ if not hasattr(torch.serialization, "FILE_LIKE"):
     setattr(torch.serialization, "FILE_LIKE", file_like_type)
 
 import ChatTTS
-import tempfile, os, asyncio
+import asyncio, tempfile, os
+import edge_tts
 import torch, torchaudio
 from discord import FFmpegPCMAudio
 
@@ -56,6 +56,7 @@ from discord import FFmpegPCMAudio
 chat_tts = ChatTTS.Chat()
 chat_tts.load(compile=False)
 
+DEFAULT_VOICE = "zh-TW-YunRuNeural"
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -66,7 +67,6 @@ tts_engine = None
 tts_lock = asyncio.Lock()
 
 def init_tts_engine():
-    """初始化並配置 pyttsx3 引擎 (只執行一次)"""
     global tts_engine
 
     logger.info("Initializing TTS engine...")
@@ -584,20 +584,16 @@ def bot_run():
             except Exception as followup_error:
                 logger.error(f"Error sending error response in leave command: {followup_error}")
 
-    async def play_tts(voice_client, text: str, context: str = None):
-        # 1. 生成 wav 陣列 (shape: [T,])
-        wavs = chat_tts.infer([text])       # 單句模式也可傳 list :contentReference[oaicite:6]{index=6}
-        wav = wavs[0]
 
-        # 2. 寫入暫存檔
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+    async def play_tts(voice_client, text: str):
+        communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp_path = tmp.name
-        torchaudio.save(tmp_path, torch.from_numpy(wav).unsqueeze(0), 24000)  # 取樣率 24k
+        await communicate.save(tmp_path)
 
-        # 3. 播放到 Discord
         source = FFmpegPCMAudio(tmp_path)
         voice_client.play(source)
-        # 等待播放結束後再刪檔
+
         while voice_client.is_playing():
             await asyncio.sleep(0.1)
         try:
