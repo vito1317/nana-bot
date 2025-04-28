@@ -59,7 +59,7 @@ def init_tts_engine():
     try:
         engine = pyttsx3.init(driverName='espeak')
         voices = engine.getProperty('voices')
-        selected_voice_id = 'zh'
+        selected_voice_id = 'Chinese (Cantonese, latin as Jyutping)'
         for v in engine.getProperty('voices'):
             print(v.id, v.name)
 
