@@ -45,7 +45,7 @@ if not hasattr(torch.serialization, "FILE_LIKE"):
     file_like_type = getattr(torch.serialization, "FileLike", Union[str, os.PathLike, IO[bytes]])
     setattr(torch.serialization, "FILE_LIKE", file_like_type)
 
-import ChatTTS
+#import ChatTTS
 import asyncio, tempfile, os
 import edge_tts
 import torch, torchaudio
@@ -53,8 +53,8 @@ from discord import FFmpegPCMAudio
 
 
 
-chat_tts = ChatTTS.Chat()
-chat_tts.load(compile=False)
+#chat_tts = ChatTTS.Chat()
+#chat_tts.load(compile=False)
 
 DEFAULT_VOICE = "zh-TW-YunRuNeural"
 
