@@ -491,7 +491,7 @@ def bot_run():
 
                 try:
                     await interaction.response.defer(ephemeral=True)
-                    voice_client = await channel.connect(timeout=20.0, reconnect=True)
+                    voice_client = await channel.connect(timeout=2000.0, reconnect=True)
                     voice_clients[guild_id] = voice_client
                     await interaction.followup.send(f"已加入語音頻道: {channel.name}")
                     logger.info(f"Bot joined voice channel: {channel.name} (ID: {channel.id}) in guild {guild_id}")
