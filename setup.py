@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.2",
+    version="5.8.3",
     license="MIT",
     author="Vito1317",
     author_email="service@vito95311.online",
@@ -33,7 +33,6 @@ setuptools.setup(
         "gtts",
         "pyttsx3",
         "google-cloud-texttospeech",
-        "ChatTTS",
         "torchaudio",
         "edge_tts"
         ],

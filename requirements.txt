@@ -11,5 +11,4 @@ gtts
 pyttsx3
 google-cloud-texttospeech
 torchaudio
-ChatTTS
 edge_tts
