@@ -39,6 +39,7 @@ from nana_bot import (
 )
 import os
 import pyttsx3
+import threading
 
 
 logging.basicConfig(level=logging.INFO,
@@ -46,30 +47,54 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
+tts_engine = None
+tts_lock = asyncio.Lock()
+
 def init_tts_engine():
-    """初始化並配置 pyttsx3 引擎"""
+    """初始化並配置 pyttsx3 引擎 (只執行一次)"""
+    global tts_engine
+    if tts_engine is not None:
+        logger.debug("TTS engine already initialized.")
+        return tts_engine
+
+    logger.info("Initializing TTS engine...")
     try:
         engine = pyttsx3.init()
         voices = engine.getProperty('voices')
         female_voice_id = None
         for voice in voices:
-            if hasattr(voice, 'gender') and voice.gender == 'female':
-                 female_voice_id = voice.id
-                 logger.info(f"找到女聲: {voice.name} (ID: {voice.id})")
-                 break
+             if any(lang in voice.id.lower() for lang in ['mandarin', 'chinese', 'zh']):
+                 if hasattr(voice, 'gender') and voice.gender == 'female':
+                     female_voice_id = voice.id
+                     logger.info(f"找到中文女聲: {voice.name} (ID: {voice.id})")
+                     break
+                 elif female_voice_id is None:
+                      female_voice_id = voice.id
+                      logger.info(f"找到可能是中文的聲音 (無性別或非女性): {voice.name} (ID: {voice.id})")
+
 
         if female_voice_id:
-            engine.setProperty('voice', female_voice_id)
-        else:
-            logger.warning("找不到指定的女聲，將使用預設聲音。")
+            try:
+                engine.setProperty('voice', female_voice_id)
+                logger.info(f"已設定 TTS 語音為: {female_voice_id}")
+            except Exception as voice_err:
+                logger.error(f"設定語音 '{female_voice_id}' 失敗: {voice_err}. 將使用預設聲音。")
+                female_voice_id = None
+
+        if not female_voice_id:
+            logger.warning("找不到或無法設定指定的中文女聲，將使用預設聲音。")
+
 
         rate = engine.getProperty('rate')
         engine.setProperty('rate', rate + 50)
         logger.info(f"TTS 語速設定為: {engine.getProperty('rate')}")
 
-        return engine
+        tts_engine = engine
+        logger.info("TTS engine initialized successfully.")
+        return tts_engine
     except Exception as e:
-        logger.error(f"初始化 pyttsx3 引擎失敗: {e}")
+        logger.error(f"初始化 pyttsx3 引擎失敗: {e}", exc_info=True)
+        tts_engine = None
         return None
 
 
@@ -118,6 +143,8 @@ def bot_run():
 
     @bot.event
     async def on_ready():
+        init_tts_engine()
+
         if model is None:
              logger.error("AI Model failed to initialize. AI reply functionality will be disabled.")
 
@@ -167,19 +194,22 @@ def bot_run():
             init_db_on_ready(f"points_{guild.id}.db", points_tables)
 
             try:
-                if guild_count == 1:
-                    synced = await bot.tree.sync()
-                    logger.info(f"Synced {len(synced)} global commands.")
-
-                print(f"目前登入身份 --> {bot.user}")
-            except discord.errors.Forbidden as e:
-                 logger.warning(f"無法在 {guild.name} (ID: {guild.id}) 同步指令，缺少權限: {e}")
-            except discord.HTTPException as e:
-                 logger.error(f"HTTP 錯誤，同步指令失敗: {e}")
+                pass
             except Exception as e:
                  logger.exception(f"在 {guild.name} 同步指令時發生未預期的錯誤: {e}")
 
+        try:
+            synced = await bot.tree.sync()
+            logger.info(f"Synced {len(synced)} global commands.")
+        except discord.errors.Forbidden as e:
+             logger.warning(f"無法同步全域指令，缺少權限: {e}")
+        except discord.HTTPException as e:
+             logger.error(f"HTTP 錯誤，同步全域指令失敗: {e}")
+        except Exception as e:
+             logger.exception(f"同步全域指令時發生未預期的錯誤: {e}")
 
+
+        print(f"目前登入身份 --> {bot.user}")
         send_daily_message.start()
         activity = discord.Game(name=f"正在{guild_count}個server上工作...")
         await bot.change_presence(status=discord.Status.online, activity=activity)
@@ -416,6 +446,8 @@ def bot_run():
                          return
                     else:
                          try:
+                             if voice_clients[guild_id].is_playing():
+                                 voice_clients[guild_id].stop()
                              await voice_clients[guild_id].disconnect()
                              logger.info(f"Bot left {voice_clients[guild_id].channel.name} to join {channel.name}")
                              del voice_clients[guild_id]
@@ -518,7 +550,14 @@ def bot_run():
                  logger.error(f"Error sending error response in leave command: {followup_error}")
 
     async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
-        """使用 pyttsx3 播放 TTS 語音"""
+        """使用 pyttsx3 播放 TTS 語音 (使用鎖和共享引擎)"""
+        global tts_engine, tts_lock
+
+        if tts_engine is None:
+            logger.error(f"[{context}] TTS engine is not initialized. Cannot play TTS.")
+            if init_tts_engine() is None:
+                 return
+
         if not voice_client or not voice_client.is_connected():
             logger.warning(f"[{context}] Voice client not connected, cannot play TTS.")
             return
@@ -527,42 +566,42 @@ def bot_run():
             logger.warning(f"[{context}] Skipping TTS for empty text.")
             return
 
-        logger.info(f"[{context}] Requesting TTS for: '{text[:50]}...'")
+        logger.info(f"[{context}] Requesting TTS lock for: '{text[:50]}...'")
+        async with tts_lock:
+            logger.info(f"[{context}] Acquired TTS lock for: '{text[:50]}...'")
+            if not voice_client.is_connected():
+                 logger.warning(f"[{context}] Voice client disconnected while waiting for lock.")
+                 return
 
+            try:
+                if voice_client.is_playing():
+                    logger.warning(f"[{context}] Voice client was already playing inside lock. Stopping.")
+                    voice_client.stop()
+                    await asyncio.sleep(0.2)
+
+                await asyncio.to_thread(run_pyttsx3_speak, tts_engine, text, context)
+                logger.info(f"[{context}] TTS playback initiated via thread for: '{text[:50]}...'")
+
+            except Exception as e:
+                logger.exception(f"[{context}] Unexpected error during TTS processing initiation: {e}")
+            finally:
+                 logger.info(f"[{context}] Releasing TTS lock for: '{text[:50]}...'")
+
+
+    def run_pyttsx3_speak(engine: pyttsx3.Engine, text: str, context: str):
+        """在同步函數中執行 pyttsx3 的 say 和 runAndWait (使用傳入的引擎)"""
+        if not engine:
+             logger.error(f"[{context}] Invalid TTS engine passed to run_pyttsx3_speak.")
+             return
         try:
-            if voice_client.is_playing():
-                logger.info(f"[{context}] Stopping current playback for new TTS.")
-                voice_client.stop()
-                await asyncio.sleep(0.2)
-
-            await asyncio.to_thread(run_pyttsx3_speak, text, context)
-            logger.info(f"[{context}] TTS playback initiated for: '{text[:50]}...'")
-
+            logger.debug(f"[{context}] Using shared pyttsx3 engine. Speaking...")
+            engine.say(text)
+            engine.runAndWait()
+            logger.debug(f"[{context}] pyttsx3 runAndWait finished.")
+        except RuntimeError as rt_err:
+             logger.error(f"[{context}] RuntimeError during pyttsx3 speak: {rt_err}")
         except Exception as e:
-            logger.exception(f"[{context}] Unexpected error during TTS processing initiation: {e}")
-
-    def run_pyttsx3_speak(text: str, context: str):
-        """在同步函數中執行 pyttsx3 的 say 和 runAndWait"""
-        engine = None
-        try:
-            engine = init_tts_engine()
-            if engine:
-                logger.debug(f"[{context}] pyttsx3 engine initialized. Speaking...")
-                engine.say(text)
-                engine.runAndWait()
-                logger.debug(f"[{context}] pyttsx3 runAndWait finished.")
-            else:
-                logger.error(f"[{context}] Failed to initialize pyttsx3 engine. Cannot speak.")
-        except Exception as e:
-            logger.error(f"[{context}] Error during pyttsx3 speak: {e}")
-        finally:
-            if engine:
-                try:
-                    pass
-                except Exception as stop_e:
-                    logger.error(f"[{context}] Error trying to stop pyttsx3 engine: {stop_e}")
-            logger.debug(f"[{context}] run_pyttsx3_speak function finished.")
-
+            logger.error(f"[{context}] Error during pyttsx3 speak: {e}", exc_info=True)
 
 
     @bot.event
@@ -595,7 +634,7 @@ def bot_run():
              return
 
         if model is None:
-             if bot.user.mentioned_in(message) or str(message.channel.id) in TARGET_CHANNEL_ID:
+             if bot.user.mentioned_in(message) or (TARGET_CHANNEL_ID and str(message.channel.id) in TARGET_CHANNEL_ID):
                   logger.warning("AI Model not available, cannot process message.")
              return
 
@@ -640,7 +679,7 @@ def bot_run():
                     c.execute("UPDATE users SET message_count = message_count + 1, user_name = ? WHERE user_id = ?", (user_name_str, user_id_str))
                 else:
                     join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
-                    c.execute("INSERT INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1))
+                    c.execute("INSERT OR IGNORE INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1))
                 conn.commit()
             except sqlite3.Error as e: logger.exception(f"Database error in update_user_message_count for user {user_id_str}: {e}")
             finally:
@@ -654,6 +693,11 @@ def bot_run():
             try:
                 conn = sqlite3.connect(analytics_db_path, timeout=10)
                 c = conn.cursor()
+                c.execute("""CREATE TABLE IF NOT EXISTS metadata (
+                               id INTEGER PRIMARY KEY AUTOINCREMENT,
+                               userid TEXT UNIQUE,
+                               total_token_count INTEGER,
+                               channelid TEXT)""")
                 c.execute("INSERT INTO metadata (userid, total_token_count, channelid) VALUES (?, ?, ?) ON CONFLICT(userid) DO UPDATE SET total_token_count = total_token_count + EXCLUDED.total_token_count, channelid = EXCLUDED.channelid", (userid_str, total_token_count, channelid_str))
                 conn.commit()
             except sqlite3.Error as e: logger.exception(f"Database error in update_token_in_db for user {userid_str}: {e}")
@@ -680,7 +724,7 @@ def bot_run():
                 conn = sqlite3.connect(chat_db_path, timeout=10)
                 c = conn.cursor()
                 c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
-                c.execute("DELETE FROM message WHERE content IS NULL")
+                c.execute("DELETE FROM message WHERE content IS NULL OR content = ''")
                 conn.commit()
                 c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
                 rows = c.fetchall()
@@ -699,12 +743,13 @@ def bot_run():
                 cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
                 result = cursor.fetchone()
                 if result: return int(result[0])
-                elif default_points > 0 and user_name_str:
+                elif default_points >= 0 and user_name_str:
                     join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
                     logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB. Creating with {default_points} points.")
-                    cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
+                    cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
                     cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
-                    cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
+                    if default_points > 0:
+                        cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
                     conn.commit()
                     return default_points
                 else: return 0
@@ -723,10 +768,17 @@ def bot_run():
                 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT " + str(default_points) + ")")
                 cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
 
-                current_points = get_user_points(user_id_str)
+                cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
+                result = cursor.fetchone()
+                if not result:
+                     logger.warning(f"User {user_id_str} not found in points DB for deduction. Cannot deduct points.")
+                     return 0
+
+                current_points = int(result[0])
                 if current_points < points_to_deduct:
                      logger.warning(f"User {user_id_str} has insufficient points ({current_points}) to deduct {points_to_deduct}.")
                      return current_points
+
                 new_points = current_points - points_to_deduct
                 cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, user_id_str))
                 cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, -points_to_deduct, "與機器人互動扣點", get_current_time_utc8()))
@@ -756,8 +808,8 @@ def bot_run():
             except Exception as e: logger.error(f"Error converting join date for user {user_id}: {e}")
         update_user_message_count(str(user_id), user_name, join_date_iso)
 
-        await bot.process_commands(message)
-        if message.content.startswith(bot.command_prefix):
+        if hasattr(bot, 'command_prefix') and message.content.startswith(bot.command_prefix):
+             await bot.process_commands(message)
              return
 
         should_respond = False
@@ -872,8 +924,12 @@ def bot_run():
                              return
 
                         if not response.candidates:
-                            logger.warning(f"No candidates returned from Gemini API for user {user_id}.")
-                            await message.reply("抱歉，我暫時無法產生回應，請稍後再試。", mention_author=False)
+                            finish_reason = getattr(response, 'candidates[0].finish_reason', 'UNKNOWN') if response.candidates else 'NO_CANDIDATES'
+                            logger.warning(f"No candidates returned from Gemini API for user {user_id}. Finish Reason: {finish_reason}")
+                            if finish_reason == 'SAFETY':
+                                 await message.reply("抱歉，我無法產生包含不當內容的回應。", mention_author=False)
+                            else:
+                                 await message.reply("抱歉，我暫時無法產生回應，請稍後再試。", mention_author=False)
                             return
 
                         api_response_text = response.text.strip()
@@ -947,7 +1003,7 @@ def bot_run():
                                 tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
                                 tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
                                 tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
-            
+                                tts_text_cleaned = re.sub(r'http[s]?://\S+', '', tts_text_cleaned)
                                 tts_text_cleaned = tts_text_cleaned.strip()
 
                                 if tts_text_cleaned:
@@ -989,14 +1045,15 @@ def bot_run():
         if not discord_bot_token:
              raise ValueError("Discord bot token is not configured.")
         logger.info("Attempting to start the bot...")
+        if tts_engine is None:
+             logger.warning("TTS engine failed to initialize before bot run. TTS will not work.")
         bot.run(discord_bot_token, log_handler=None)
     except discord.errors.LoginFailure:
         logger.critical("Login Failed: Invalid Discord Token provided.")
     except discord.HTTPException as e:
          logger.critical(f"Failed to connect to Discord: {e}")
     except Exception as e:
-        logger.critical(f"Critical error running the bot: {e}")
-        logger.critical(traceback.format_exc())
+        logger.critical(f"Critical error running the bot: {e}", exc_info=True)
     finally:
          logger.info("Bot process has stopped.")
 
