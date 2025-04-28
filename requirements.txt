@@ -9,3 +9,4 @@ search_engine_tool_vito1317
 python-dotenv
 gtts
 pyttsx3
+google-cloud-texttospeech

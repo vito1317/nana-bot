@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.7.6",
+    version="5.7.7",
     license="MIT",
     author="Vito1317",
     author_email="service@vito95311.online",
@@ -31,8 +31,9 @@ setuptools.setup(
         "search-engine-tool-vito1317",
         "python-dotenv",
         "gtts",
-        "pyttsx3"
-    ],
+        "pyttsx3",
+        "google-cloud-texttospeech",
+        ],
     entry_points={
         'console_scripts': [
             'nana-bot = nana_bot:main',
