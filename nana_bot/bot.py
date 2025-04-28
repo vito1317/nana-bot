@@ -40,8 +40,16 @@ from nana_bot import (
 import os
 import pyttsx3
 import threading
-import tempfile
+import ChatTTS
+import tempfile, os, asyncio
+import torch, torchaudio
 from discord import FFmpegPCMAudio
+
+
+
+chat_tts = ChatTTS.Chat()
+chat_tts.load(compile=False)
+
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -570,67 +578,27 @@ def bot_run():
             except Exception as followup_error:
                 logger.error(f"Error sending error response in leave command: {followup_error}")
 
-    async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
-        global tts_engine, tts_lock
+    async def play_tts(voice_client, text: str):
+        # 1. 生成 wav 陣列 (shape: [T,])
+        wavs = chat_tts.infer([text])       # 單句模式也可傳 list :contentReference[oaicite:6]{index=6}
+        wav = wavs[0]
 
-        if tts_engine is None:
-            if init_tts_engine() is None:
-                return
+        # 2. 寫入暫存檔
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+        torchaudio.save(tmp_path, torch.from_numpy(wav).unsqueeze(0), 24000)  # 取樣率 24k
 
-        if not voice_client or not voice_client.is_connected() or not text.strip():
-            return
+        # 3. 播放到 Discord
+        source = FFmpegPCMAudio(tmp_path)
+        voice_client.play(source)
+        # 等待播放結束後再刪檔
+        while voice_client.is_playing():
+            await asyncio.sleep(0.1)
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
-        async with tts_lock:
-            # 1. 用 pyttsx3 產生檔案
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-                tmp_path = tmp.name
-            def gen_file():
-                tts_engine.save_to_file(text, tmp_path)
-                tts_engine.runAndWait()
-            await asyncio.to_thread(gen_file)
-
-            # 2. 播放到 Discord
-            source = FFmpegPCMAudio(tmp_path)
-            voice_client.play(source)
-
-            # 3. 等待播放結束再刪檔
-            while voice_client.is_playing():
-                await asyncio.sleep(0.1)
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-
-
-        def run_pyttsx3_speak(engine: pyttsx3.Engine, text: str, context: str):
-            """在同步函數中執行 pyttsx3 的 say 和 runAndWait (使用傳入的引擎)"""
-            if not engine:
-                logger.error(f"[{context}] Invalid TTS engine passed to run_pyttsx3_speak.")
-                return
-            try:
-                is_busy = False
-                try:
-                    is_busy = engine.isBusy
-                    logger.debug(f"[{context}] Engine busy state before say(): {is_busy}")
-                except Exception as busy_err:
-                    logger.error(f"[{context}] Error checking engine.isBusy: {busy_err}")
-
-                if is_busy:
-                    logger.warning(f"[{context}] Engine reported as busy before say(). Skipping.")
-                    return
-
-                logger.debug(f"[{context}] Using shared pyttsx3 engine. Calling engine.say().")
-                engine.say(text)
-                logger.debug(f"[{context}] engine.say() called. Calling engine.runAndWait().")
-                engine.runAndWait()
-                logger.debug(f"[{context}] engine.runAndWait() finished.")
-                time.sleep(0.1)
-                logger.debug(f"[{context}] Delay finished after runAndWait.")
-            except RuntimeError as rt_err:
-                logger.error(f"[{context}] RuntimeError during pyttsx3 speak: {rt_err}", exc_info=True)
-            except Exception as e:
-                logger.error(f"[{context}] Error during pyttsx3 speak: {e}", exc_info=True)
 
 
     @bot.event
