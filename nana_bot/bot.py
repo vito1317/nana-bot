@@ -38,14 +38,39 @@ from nana_bot import (
     default_points
 )
 import os
-import tempfile
-import shutil
-from gtts import gTTS
+import pyttsx3
 
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def init_tts_engine():
+    """初始化並配置 pyttsx3 引擎"""
+    try:
+        engine = pyttsx3.init()
+        voices = engine.getProperty('voices')
+        female_voice_id = None
+        for voice in voices:
+            if hasattr(voice, 'gender') and voice.gender == 'female':
+                 female_voice_id = voice.id
+                 logger.info(f"找到女聲: {voice.name} (ID: {voice.id})")
+                 break
+
+        if female_voice_id:
+            engine.setProperty('voice', female_voice_id)
+        else:
+            logger.warning("找不到指定的女聲，將使用預設聲音。")
+
+        rate = engine.getProperty('rate')
+        engine.setProperty('rate', rate + 50)
+        logger.info(f"TTS 語速設定為: {engine.getProperty('rate')}")
+
+        return engine
+    except Exception as e:
+        logger.error(f"初始化 pyttsx3 引擎失敗: {e}")
+        return None
 
 
 def get_current_time_utc8():
@@ -399,7 +424,7 @@ def bot_run():
 
                 try:
                     await interaction.response.defer(ephemeral=True)
-                    voice_client = await channel.connect(timeout=20.0, reconnect=True)
+                    voice_client = await channel.connect(timeout=20.0, reconnect=True, self_deaf=True)
                     voice_clients[guild_id] = voice_client
                     await interaction.followup.send(f"已加入語音頻道: {channel.name}")
                     logger.info(f"Bot joined voice channel: {channel.name} (ID: {channel.id}) in guild {guild_id}")
@@ -433,15 +458,18 @@ def bot_run():
             logger.error(f"HTTPException while handling join command: {e}")
             try:
                 await interaction.followup.send(f"處理加入指令時發生HTTP錯誤。", ephemeral=True)
+            except discord.errors.NotFound:
+                 logger.error("Original interaction for join command not found for followup.")
             except discord.errors.InteractionResponded:
                  pass
             except Exception as followup_error:
                  logger.error(f"Error sending followup in join command after HTTPException: {followup_error}")
-
         except Exception as e:
             logger.exception(f"An unexpected error occurred during join command: {e}")
             try:
                 await interaction.followup.send(f"處理加入指令時發生未預期的錯誤。", ephemeral=True)
+            except discord.errors.NotFound:
+                 logger.error("Original interaction for join command not found for followup.")
             except discord.errors.InteractionResponded:
                  pass
             except Exception as followup_error:
@@ -456,6 +484,8 @@ def bot_run():
 
             if voice_client and voice_client.is_connected():
                 channel_name = voice_client.channel.name
+                if voice_client.is_playing():
+                    voice_client.stop()
                 await voice_client.disconnect()
                 del voice_clients[guild_id]
                 await interaction.response.send_message(f"已離開語音頻道: {channel_name}。")
@@ -464,6 +494,8 @@ def bot_run():
                 vc = discord.utils.get(bot.voice_clients, guild=interaction.guild)
                 if vc and vc.is_connected():
                      channel_name = vc.channel.name
+                     if vc.is_playing():
+                         vc.stop()
                      await vc.disconnect()
                      if guild_id in voice_clients:
                           del voice_clients[guild_id]
@@ -476,84 +508,61 @@ def bot_run():
             logger.warning("Interaction already responded to in 'leave' command.")
         except discord.errors.HTTPException as e:
             logger.error(f"HTTPException while handling leave command: {e}")
-            try:
-                await interaction.followup.send(f"處理離開指令時發生HTTP錯誤。", ephemeral=True)
-            except discord.errors.InteractionResponded:
-                 pass
-            except Exception as followup_error:
-                 logger.error(f"Error sending followup in leave command after HTTPException: {followup_error}")
         except Exception as e:
             logger.exception(f"An unexpected error occurred during leave command: {e}")
             try:
-                await interaction.followup.send(f"處理離開指令時發生未預期的錯誤。", ephemeral=True)
+                await interaction.response.send_message(f"處理離開指令時發生未預期的錯誤。", ephemeral=True)
             except discord.errors.InteractionResponded:
                  pass
             except Exception as followup_error:
-                 logger.error(f"Error sending followup in leave command after unexpected error: {followup_error}")
+                 logger.error(f"Error sending error response in leave command: {followup_error}")
 
     async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
-        temp_file_path = None
+        """使用 pyttsx3 播放 TTS 語音"""
+        if not voice_client or not voice_client.is_connected():
+            logger.warning(f"[{context}] Voice client not connected, cannot play TTS.")
+            return
+
+        if not text or not text.strip():
+            logger.warning(f"[{context}] Skipping TTS for empty text.")
+            return
+
+        logger.info(f"[{context}] Requesting TTS for: '{text[:50]}...'")
+
         try:
-            if not text or not text.strip():
-                logger.warning(f"[{context}] Skipping TTS for empty text.")
-                return
-
-            logger.info(f"[{context}] Generating TTS for: '{text[:50]}...'")
-
-            tts = await asyncio.to_thread(gTTS, text=text, lang='zh-tw')
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                temp_file_path = fp.name
-                await asyncio.to_thread(tts.write_to_fp, fp)
-                logger.debug(f"[{context}] Temporary TTS file created: {temp_file_path}")
-
-            if not os.path.exists(temp_file_path):
-                logger.error(f"[{context}] Temporary TTS file not found after creation: {temp_file_path}")
-                return
-
-            audio_source = discord.FFmpegPCMAudio(temp_file_path)
-
             if voice_client.is_playing():
                 logger.info(f"[{context}] Stopping current playback for new TTS.")
                 voice_client.stop()
                 await asyncio.sleep(0.2)
 
-            logger.info(f"[{context}] Playing TTS audio...")
-            voice_client.play(audio_source, after=lambda e: asyncio.run_coroutine_threadsafe(
-                handle_tts_error(e, temp_file_path, context), bot.loop
-            ).result())
+            await asyncio.to_thread(run_pyttsx3_speak, text, context)
+            logger.info(f"[{context}] TTS playback initiated for: '{text[:50]}...'")
 
-        except gTTS.gTTSError as e:
-            logger.error(f"[{context}] gTTS Error: {e}")
-            if temp_file_path: await remove_temp_file(temp_file_path, context)
-        except discord.errors.ClientException as e:
-            logger.error(f"[{context}] Discord ClientException during TTS playback: {e}")
-            if temp_file_path: await remove_temp_file(temp_file_path, context)
-        except FileNotFoundError:
-             logger.error(f"[{context}] FFmpeg not found. Please install FFmpeg and ensure it's in the system PATH.")
-             await remove_temp_file(temp_file_path, context)
         except Exception as e:
-            logger.exception(f"[{context}] Unexpected error during TTS processing: {e}")
-            if temp_file_path: await remove_temp_file(temp_file_path, context)
+            logger.exception(f"[{context}] Unexpected error during TTS processing initiation: {e}")
 
-    async def remove_temp_file(file_path, context="TTS Cleanup"):
-        if file_path and os.path.exists(file_path):
-            try:
-                logger.debug(f"[{context}] Attempting to remove temporary file: {file_path}")
-                await asyncio.to_thread(os.remove, file_path)
-                logger.debug(f"[{context}] Successfully removed temporary file: {file_path}")
-            except OSError as e:
-                logger.error(f"[{context}] Error removing temporary file {file_path}: {e}")
-        elif file_path:
-             logger.debug(f"[{context}] Temporary file path provided but file does not exist: {file_path}")
+    def run_pyttsx3_speak(text: str, context: str):
+        """在同步函數中執行 pyttsx3 的 say 和 runAndWait"""
+        engine = None
+        try:
+            engine = init_tts_engine()
+            if engine:
+                logger.debug(f"[{context}] pyttsx3 engine initialized. Speaking...")
+                engine.say(text)
+                engine.runAndWait()
+                logger.debug(f"[{context}] pyttsx3 runAndWait finished.")
+            else:
+                logger.error(f"[{context}] Failed to initialize pyttsx3 engine. Cannot speak.")
+        except Exception as e:
+            logger.error(f"[{context}] Error during pyttsx3 speak: {e}")
+        finally:
+            if engine:
+                try:
+                    pass
+                except Exception as stop_e:
+                    logger.error(f"[{context}] Error trying to stop pyttsx3 engine: {stop_e}")
+            logger.debug(f"[{context}] run_pyttsx3_speak function finished.")
 
-
-    async def handle_tts_error(error, file_path, context="TTS Playback"):
-        if error:
-            logger.error(f'[{context}] Player error: {error}')
-        else:
-             logger.info(f"[{context}] Playback finished successfully.")
-        await remove_temp_file(file_path, context + " Callback")
 
 
     @bot.event
@@ -561,16 +570,19 @@ def bot_run():
         guild_id = member.guild.id
         bot_voice_client = voice_clients.get(guild_id)
 
-        if not bot_voice_client or not bot_voice_client.is_connected():
+        if not bot_voice_client or not bot_voice_client.is_connected() or member.id == bot.user.id:
             return
-        if member.id == bot.user.id:
-             return
 
         if before.channel != bot_voice_client.channel and after.channel == bot_voice_client.channel:
             user_name = member.display_name
             logger.info(f"User '{user_name}' joined voice channel '{after.channel.name}' where the bot is.")
             tts_message = f"{user_name} 加入了語音頻道"
             await play_tts(bot_voice_client, tts_message, context="Join Notification")
+        elif before.channel == bot_voice_client.channel and after.channel != bot_voice_client.channel:
+             user_name = member.display_name
+             logger.info(f"User '{user_name}' left voice channel '{before.channel.name}' where the bot was.")
+             tts_message = f"{user_name} 離開了語音頻道"
+             await play_tts(bot_voice_client, tts_message, context="Leave Notification")
 
 
     @bot.event
@@ -597,7 +609,6 @@ def bot_run():
         analytics_db_path = os.path.join(db_base_path, f"analytics_server_{server_id}.db")
         chat_db_path = os.path.join(db_base_path, f"messages_chat_{server_id}.db")
         points_db_path = os.path.join(db_base_path, f'points_{server_id}.db')
-
 
         def init_db(db_filename, tables=None):
             db_full_path = os.path.join(db_base_path, db_filename)
@@ -655,6 +666,7 @@ def bot_run():
             try:
                 conn = sqlite3.connect(chat_db_path, timeout=10)
                 c = conn.cursor()
+                c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
                 c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
                 c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
                 conn.commit()
@@ -683,6 +695,7 @@ def bot_run():
             try:
                 conn = sqlite3.connect(points_db_path, timeout=10)
                 cursor = conn.cursor()
+                cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT " + str(default_points) + ")")
                 cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
                 result = cursor.fetchone()
                 if result: return int(result[0])
@@ -690,6 +703,7 @@ def bot_run():
                     join_date_to_insert = join_date_iso if join_date_iso else datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
                     logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB. Creating with {default_points} points.")
                     cursor.execute('INSERT INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
+                    cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
                     cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
                     conn.commit()
                     return default_points
@@ -706,6 +720,9 @@ def bot_run():
             try:
                 conn = sqlite3.connect(points_db_path, timeout=10)
                 cursor = conn.cursor()
+                cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT " + str(default_points) + ")")
+                cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
+
                 current_points = get_user_points(user_id_str)
                 if current_points < points_to_deduct:
                      logger.warning(f"User {user_id_str} has insufficient points ({current_points}) to deduct {points_to_deduct}.")
@@ -725,6 +742,7 @@ def bot_run():
         try:
             conn_analytics = sqlite3.connect(analytics_db_path, timeout=10)
             c_analytics = conn_analytics.cursor()
+            c_analytics.execute("CREATE TABLE IF NOT EXISTS messages (message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)")
             c_analytics.execute("INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) VALUES (?, ?, ?, ?, ?)", (str(user_id), user_name, channel_id, message.created_at.replace(tzinfo=None).isoformat(), message.content))
             conn_analytics.commit()
         except sqlite3.Error as e: logger.exception(f"Database error inserting message into analytics table: {e}")
@@ -736,32 +754,43 @@ def bot_run():
             try:
                 join_date_iso = message.author.joined_at.replace(tzinfo=None).isoformat()
             except Exception as e: logger.error(f"Error converting join date for user {user_id}: {e}")
-
         update_user_message_count(str(user_id), user_name, join_date_iso)
 
         await bot.process_commands(message)
+        if message.content.startswith(bot.command_prefix):
+             return
 
         should_respond = False
-        target_channels = TARGET_CHANNEL_ID if isinstance(TARGET_CHANNEL_ID, (list, tuple)) else [TARGET_CHANNEL_ID]
+        target_channels = []
+        if isinstance(TARGET_CHANNEL_ID, (list, tuple)):
+            target_channels = [str(cid) for cid in TARGET_CHANNEL_ID]
+        elif isinstance(TARGET_CHANNEL_ID, (str, int)):
+             target_channels = [str(TARGET_CHANNEL_ID)]
 
         if bot.user.mentioned_in(message) and not message.mention_everyone:
              should_respond = True
+             logger.debug(f"Responding because bot was mentioned by {user_name}")
         elif message.reference and message.reference.resolved:
              if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user:
                   should_respond = True
+                  logger.debug(f"Responding because user replied to bot's message")
         elif bot_name and bot_name in message.content:
              should_respond = True
-        elif message.channel.id in target_channels:
+             logger.debug(f"Responding because bot name '{bot_name}' was mentioned")
+        elif channel_id in target_channels:
              should_respond = True
+             logger.debug(f"Responding because message is in target channel {channel_id}")
 
         if should_respond:
             if message.guild and message.guild.id not in WHITELISTED_SERVERS:
+                logger.info(f"Ignoring message from non-whitelisted server: {message.guild.name} ({message.guild.id})")
                 return
 
             user_points = get_user_points(str(user_id), user_name, join_date_iso)
             if Point_deduction_system > 0 and user_points < Point_deduction_system:
                 try:
                     await message.reply(f"抱歉，您的點數 ({user_points}) 不足以支付本次互動所需的 {Point_deduction_system} 點。", mention_author=False)
+                    logger.info(f"User {user_name} ({user_id}) has insufficient points ({user_points}/{Point_deduction_system})")
                 except discord.HTTPException as e: logger.error(f"Error replying about insufficient points: {e}")
                 return
 
@@ -811,7 +840,8 @@ def bot_run():
                                 role = "user" if db_user != bot_name else "model"
                                 message_text = f"{db_timestamp} {db_user}: {db_content}" if role == "user" else db_content
                                 chat_history_processed.append({"role": role, "parts": [{"text": message_text}]})
-                            else: logger.warning(f"Skipping empty message in chat history from user {db_user} at {db_timestamp}")
+                            else:
+                                logger.warning(f"Skipping empty message in chat history from user {db_user} at {db_timestamp}")
 
                     if debug:
                         logger.debug("--- Chat History for API ---")
@@ -847,39 +877,32 @@ def bot_run():
                             return
 
                         api_response_text = response.text.strip()
-                        logger.info(f"Gemini API response for user {user_id}: {api_response_text}")
+                        logger.info(f"Gemini API response for user {user_id}: {api_response_text[:100]}...")
 
                         try:
                              usage_metadata = getattr(response, 'usage_metadata', None)
-                             # **修正：使用 getattr 訪問屬性**
+                             total_token_count = None
                              if usage_metadata and hasattr(usage_metadata, 'total_token_count'):
                                  total_token_count = getattr(usage_metadata, 'total_token_count', None)
                                  if total_token_count is not None:
                                      logger.info(f"Total token count from usage_metadata: {total_token_count}")
-                                     update_token_in_db(total_token_count, str(user_id), channel_id)
                                  else:
                                      logger.warning("Found usage_metadata but 'total_token_count' attribute is missing or None.")
-                                     # 嘗試備用方案
-                                     if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
-                                         total_token_count = response.candidates[0].token_count
-                                         logger.info(f"Total token count from candidate: {total_token_count}")
-                                         update_token_in_db(total_token_count, str(user_id), channel_id)
-                                     else:
-                                         logger.warning("Could not find token count in usage_metadata or candidate.")
                              else:
                                  logger.warning("No usage_metadata found or it lacks 'total_token_count' attribute.")
-                                 # 嘗試備用方案
-                                 if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
-                                     total_token_count = response.candidates[0].token_count
-                                     logger.info(f"Total token count from candidate (fallback): {total_token_count}")
-                                     update_token_in_db(total_token_count, str(user_id), channel_id)
-                                 else:
-                                     logger.warning("Could not find token count in API response via any method.")
+
+                             if total_token_count is None and response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
+                                 total_token_count = response.candidates[0].token_count
+                                 logger.info(f"Total token count from candidate (fallback): {total_token_count}")
+
+                             if total_token_count is not None:
+                                 update_token_in_db(total_token_count, str(user_id), channel_id)
+                             else:
+                                 logger.warning("Could not find token count in API response via any method.")
                         except AttributeError as attr_err:
                              logger.error(f"Attribute error processing token count: {attr_err}. Response structure might have changed.")
                         except Exception as token_error:
                              logger.error(f"Error processing token count: {token_error}")
-
 
                         store_message(user_name, message.content, timestamp)
                         if api_response_text:
@@ -887,24 +910,33 @@ def bot_run():
 
                         if api_response_text:
                             if len(api_response_text) > 2000:
-                                logger.warning(f"Final API reply exceeds 2000 characters ({len(api_response_text)}). Splitting.")
+                                logger.warning(f"API reply exceeds 2000 characters ({len(api_response_text)}). Splitting.")
                                 parts = []
                                 current_part = ""
                                 for line in api_response_text.split('\n'):
                                      if len(current_part) + len(line) + 1 < 2000:
                                           current_part += line + "\n"
                                      else:
-                                          parts.append(current_part)
-                                          current_part = line + "\n"
-                                parts.append(current_part)
+                                          if current_part:
+                                               parts.append(current_part)
+                                          if len(line) + 1 >= 2000:
+                                               logger.warning(f"Single line exceeds 2000 chars, sending as is: {line[:50]}...")
+                                               parts.append(line[:1999] + "\n")
+                                               current_part = ""
+                                          else:
+                                               current_part = line + "\n"
+                                if current_part:
+                                     parts.append(current_part)
 
                                 first_part = True
                                 for part in parts:
+                                     part_to_send = part.strip()
+                                     if not part_to_send: continue
                                      if first_part:
-                                          await message.reply(part.strip(), mention_author=False)
+                                          await message.reply(part_to_send, mention_author=False)
                                           first_part = False
                                      else:
-                                          await message.channel.send(part.strip())
+                                          await message.channel.send(part_to_send)
                                      await asyncio.sleep(0.5)
                             else:
                                 await message.reply(api_response_text, mention_author=False)
@@ -915,19 +947,26 @@ def bot_run():
                                 tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
                                 tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
                                 tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
-                                await play_tts(guild_voice_client, tts_text_cleaned, context="AI Reply")
+            
+                                tts_text_cleaned = tts_text_cleaned.strip()
+
+                                if tts_text_cleaned:
+                                    await play_tts(guild_voice_client, tts_text_cleaned, context="AI Reply")
+                                else:
+                                     logger.info("Skipping TTS for AI reply after cleaning resulted in empty text.")
+                        else:
+                             logger.warning(f"Gemini API returned empty text response for user {user_id}.")
 
 
                     except genai.types.BlockedPromptException as e:
-                         logger.warning(f"Gemini API blocked prompt (initial call) for user {user_id}: {e}")
+                         logger.warning(f"Gemini API blocked prompt (send_message) for user {user_id}: {e}")
                          await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
                     except genai.types.StopCandidateException as e:
-                         logger.warning(f"Gemini API stopped candidate generation (initial call) for user {user_id}: {e}")
+                         logger.warning(f"Gemini API stopped candidate generation (send_message) for user {user_id}: {e}")
                          await message.reply("抱歉，產生回應時被中斷，請稍後再試。", mention_author=False)
                     except Exception as e:
                         logger.exception(f"Error during Gemini API interaction for user {user_id}: {e}")
                         await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
-
 
                 except discord.errors.HTTPException as e:
                      if e.status == 403:
@@ -940,11 +979,17 @@ def bot_run():
                           logger.exception(f"HTTPException occurred while processing message for user {user_id}: {e}")
                 except Exception as e:
                     logger.exception(f"An unexpected error occurred in on_message processing for user {user_id}: {e}")
+                    try:
+                        await message.reply("處理您的訊息時發生未預期的錯誤。", mention_author=False)
+                    except Exception as reply_err:
+                         logger.error(f"Failed to send error reply message: {reply_err}")
+
 
     try:
         if not discord_bot_token:
              raise ValueError("Discord bot token is not configured.")
-        bot.run(discord_bot_token)
+        logger.info("Attempting to start the bot...")
+        bot.run(discord_bot_token, log_handler=None)
     except discord.errors.LoginFailure:
         logger.critical("Login Failed: Invalid Discord Token provided.")
     except discord.HTTPException as e:
@@ -952,16 +997,18 @@ def bot_run():
     except Exception as e:
         logger.critical(f"Critical error running the bot: {e}")
         logger.critical(traceback.format_exc())
+    finally:
+         logger.info("Bot process has stopped.")
 
 
 if __name__ == "__main__":
      if not discord_bot_token:
-          logger.critical("Discord bot token is not set!")
+          logger.critical("Discord bot token is not set! Bot cannot start.")
      elif not API_KEY:
-          logger.critical("Gemini API key is not set!")
+          logger.critical("Gemini API key is not set! AI features will be disabled.")
      else:
-          logger.info("Starting bot...")
+          logger.info("Starting bot from main execution block...")
           bot_run()
-          logger.info("Bot stopped.")
+          logger.info("Bot execution finished.")
 
 __all__ = ['bot_run', 'bot']
