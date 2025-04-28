@@ -585,7 +585,7 @@ def bot_run():
                 logger.error(f"Error sending error response in leave command: {followup_error}")
 
 
-    async def play_tts(voice_client, text: str):
+    async def play_tts(voice_client, text: str, context: str = None):
         communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp_path = tmp.name
