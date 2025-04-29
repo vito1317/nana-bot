@@ -690,7 +690,7 @@ async def join(interaction: discord.Interaction):
     logger.info(f"嘗試連接到語音頻道 {channel.id} (伺服器 {guild_id})")
     try:
         await interaction.response.defer(ephemeral=False, thinking=True)
-        voice_client = await channel.connect(timeout=60.0, reconnect=True, self_deaf=True)
+        voice_client = await channel.connect(timeout=60.0, reconnect=True, self_deaf=False)
         voice_clients[guild_id] = voice_client
         await interaction.followup.send(f"成功加入語音頻道: {channel.mention}")
         logger.info(f"機器人成功加入語音頻道: {channel.name} (ID: {channel.id}) 於伺服器 {guild_id}")
