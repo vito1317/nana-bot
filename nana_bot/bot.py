@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import traceback
-from discord.ext.voice_recv.extras import SpeechRecognitionSink, BasicSink
+from discord.ext.voice_recv.extras import SpeechRecognitionSink
+from discord.ext.voice_recv import BasicSink
 import discord.ext.voice_recv
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
