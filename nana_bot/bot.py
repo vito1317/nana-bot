@@ -53,7 +53,7 @@ import edge_tts
 import functools
 
 
-DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
+DEFAULT_VOICE = "zh-TW-HsiaoChenNeural"
 
 logging.basicConfig(level=logging.INFO if not debug else logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
