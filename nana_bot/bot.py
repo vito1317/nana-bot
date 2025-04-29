@@ -855,7 +855,7 @@ async def join(interaction: discord.Interaction):
     logger.info(f"嘗試連接到語音頻道 {channel.id} (伺服器 {guild_id})")
     try:
         await interaction.response.defer(ephemeral=False, thinking=True)
-        voice_client = await channel.connect(timeout=60.0, reconnect=True, self_deaf=True)
+        voice_client = await channel.connect(timeout=60.0, reconnect=True, self_deaf=False)
         voice_clients[guild_id] = voice_client
 
         logger.info(f"[STT] Starting listening in channel {channel.name}...")
