@@ -5,7 +5,6 @@ from discord.ext.voice_recv.extras import SpeechRecognitionSink
 import discord.ext.voice_recv
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
-#import discord.sinks as sinks
 from discord.ext.voice_recv import sinks
 from discord.ext import commands, tasks, voice_recv
 from typing import Optional, Dict
@@ -59,10 +58,10 @@ import speech_recognition as sr
 import io
 
 safety_settings = {
-    HarmCategory.HARM_CATEGORY_HATE_SPEECH:      HarmBlockThreshold.BLOCK_NONE,  # 嚴格過濾仇恨言論
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH:      HarmBlockThreshold.BLOCK_NONE,
     HarmCategory.HARM_CATEGORY_HARASSMENT:       HarmBlockThreshold.BLOCK_NONE,
     HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,  # 過濾暴力或危險建議
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
 }
 
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
@@ -676,7 +675,7 @@ async def on_member_remove(member):
     except Exception as e:
         logger.exception(f"Unexpected error during on_member_remove for {member.name} (ID: {member.id}) in guild {guild.id}: {e}")
 
-async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc: discord.VoiceClient): # <--- 使用 sinks.WaveSink
+async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc: discord.VoiceClient):
     logger.info(f"[STT] after_listening 開始執行，sink.audio_data 長度 = {len(sink.audio_data)}")
     loop = asyncio.get_running_loop()
     guild_id = vc.guild.id if vc.guild else None
@@ -687,7 +686,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
         if guild_id in listening_guilds and listening_guilds[guild_id].is_connected():
             logger.debug(f"[STT] Restarting listening in guild {guild_id} (no audio data)")
             try:
-                 new_sink = make_wave_sink(vc.channel.guild.id)# <--- 使用 sinks.WaveSink
+                 new_sink = make_wave_sink(vc.channel.guild.id)
                  listening_guilds[guild_id].listen(new_sink, after=lambda error, sink=new_sink: asyncio.create_task(after_listening(sink, channel, vc)))
             except Exception as e:
                  logger.error(f"[STT] Error restarting listening in guild {guild_id}: {e}")
@@ -722,7 +721,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
     if guild_id in listening_guilds and listening_guilds[guild_id].is_connected():
         logger.info(f"[STT] Restarting listening in guild {guild_id} after processing.")
         try:
-            new_sink = make_wave_sink(vc.channel.guild.id)# <--- 使用 sinks.WaveSink
+            new_sink = make_wave_sink(vc.channel.guild.id)
             listening_guilds[guild_id].listen(new_sink, after=lambda error, sink=new_sink: asyncio.create_task(after_listening(sink, channel, vc)))
         except Exception as e:
             logger.error(f"[STT] Error restarting listening in guild {guild_id}: {e}")
@@ -802,25 +801,21 @@ def process_recognized_text(vc: discord.VoiceClient, user_id: int, user_name: st
         logger.error(f"[STT_Worker] Could not request results from Google Speech Recognition service for {user_name}; {e}")
     except Exception as stt_err:
         logger.exception(f"[STT_Worker] Unexpected error during speech recognition for {user_name}: {stt_err}")
-        
+
 os.makedirs("recordings", exist_ok=True)
 async def handle_result(results: list, channel: discord.TextChannel, vc: discord.VoiceClient):
-    # 1. 如果沒有辨識結果就跳過
     if not results:
         return
     text = results[-1].strip()
     logger.info(f"[STT_Extras] Recognized via extras: {text!r}")
 
-    # 2. 只處理包含啟動詞的語句
     if STT_ACTIVATION_WORD.lower() not in text.lower():
         return
     query = text.lower().split(STT_ACTIVATION_WORD.lower(), 1)[1].strip()
     if not query:
-        # 啟動詞後沒內容，提示重說
         await play_tts(vc, "嗯？請問有什麼問題嗎？", context="STT Empty Query")
         return
 
-    # 3. 組 initial_prompt / initial_response 跟聊天歷史（同 join 的做法）
     timestamp = get_current_time_utc8()
     initial_prompt = (
         f"{bot_name}是一位使用 DBT 技巧的智能陪伴機器人，來自台灣，只能提供意見不能代替專業諮商。"
@@ -850,13 +845,11 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
         role = "model" if db_user == bot_name else "user"
         history.append({"role": role, "parts": [{"text": db_content}]})
 
-    # 4. 用 channel.typing 包裝思考時間
     async with channel.typing():
         if not model:
             await play_tts(vc, "抱歉，AI 核心未初始化，無法回應。", context="STT AI Unavailable")
             return
 
-        # 5. 呼叫 AI 並拿到文字回覆
         chat = model.start_chat(history=history)
         response = await chat.send_message_async(
             query,
@@ -865,11 +858,9 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
         )
         reply = response.text.strip() if response.candidates else "抱歉，我暫時無法回答。"
 
-        # 6. 同時 TTS 播放並在文字頻道回覆
         await play_tts(vc, reply, context="STT AI Response")
         await channel.send(reply)
 
-# /join 裡面維持不變，只要確保用 SpeechRecognitionSink 指定 callback
 @bot.tree.command(name='join', description="讓機器人加入語音並啟動 STT")
 @app_commands.guild_only()
 async def join(interaction: discord.Interaction):
@@ -887,10 +878,14 @@ async def join(interaction: discord.Interaction):
     voice_clients[interaction.guild.id] = vc
 
     sink = SpeechRecognitionSink(
-        recognizer,
-        language=STT_LANGUAGE,
-        callback=lambda results: handle_result(results, interaction.channel, vc)
+        process_cb=None,
+        default_recognizer="whisper",
+        text_cb=lambda results:
+            asyncio.create_task(
+                handle_result(results, interaction.channel, vc)
+            )
     )
+
     vc.listen(sink)
     listening_guilds[interaction.guild.id] = vc
 
@@ -898,7 +893,6 @@ async def join(interaction: discord.Interaction):
         f"已加入 {user.voice.channel.mention} 並啟用語音辨識！請說「{STT_ACTIVATION_WORD}」＋問題，我會用 TTS 回答。", 
         ephemeral=True
     )
-
 
 
 @bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
