@@ -896,7 +896,9 @@ async def join_sr(interaction: discord.Interaction):
         )
     sink = SpeechRecognitionSink(text_cb=text_cb)
     vc.listen(sink)
-    await interaction.response.send_message("已加入並啟動語音辨識 (SpeechRecognitionSink)", ephemeral=True)@bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
+    await interaction.response.send_message("已加入並啟動語音辨識 (SpeechRecognitionSink)", ephemeral=True)
+    
+@bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
 @app_commands.guild_only()
 async def leave(interaction: discord.Interaction):
     guild = interaction.guild
