@@ -74,11 +74,10 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
     logger.info(f"[{context}] 開始為文字生成 TTS: '{text[:50]}...' (Guild: {voice_client.guild.id})")
     loop = asyncio.get_running_loop()
     tmp_path = None
-    source = None # 初始化 source
-    playback_started = False # 新增標誌追蹤播放是否已啟動
+    source = None
+    playback_started = False
 
     try:
-        # 步驟 1: 生成 TTS 音檔
         step1 = time.time()
         communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
@@ -87,16 +86,14 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         await communicate.save(tmp_path)
         logger.info(f"[{context}] 步驟 1 (生成音檔) 耗時 {time.time()-step1:.4f}s -> {tmp_path}")
 
-        # 步驟 2: 創建 FFmpeg 音源 (在執行緒中)
         step2 = time.time()
         ffmpeg_options = {
             'before_options': '',
             'options': '-vn'
         }
-        # 檢查檔案是否存在
         if not os.path.exists(tmp_path):
              logger.error(f"[{context}] 暫存檔案 {tmp_path} 在創建音源前消失了！")
-             return # 提早退出
+             return
 
         source = await loop.run_in_executor(
             None,
@@ -104,28 +101,22 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         )
         logger.info(f"[{context}] 步驟 2 (創建音源) 耗時 {time.time()-step2:.4f}s")
 
-        # 再次檢查連接狀態
         if not voice_client.is_connected():
              logger.warning(f"[{context}] 創建音源後，語音客戶端已斷開連接。")
-             # 不需要手動清理，finally 會處理 (如果 playback_started 為 False)
              return
 
-        # 如果正在播放則停止
         if voice_client.is_playing():
             logger.info(f"[{context}] 停止當前播放以播放新的 TTS。")
             voice_client.stop()
             await asyncio.sleep(0.1)
 
-        # 步驟 3: 播放音檔
         step3 = time.time()
         def _cleanup(error, path_to_clean):
-            # 這個回調函數在播放完成或出錯後執行
             log_prefix = f"[{context}][Cleanup]"
             if error:
                 logger.error(f"{log_prefix} 播放器錯誤: {error}")
             else:
                  logger.info(f"{log_prefix} TTS 播放完成。")
-            # --- 清理工作在這裡進行 ---
             try:
                 if path_to_clean and os.path.exists(path_to_clean):
                     os.remove(path_to_clean)
@@ -135,9 +126,8 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
             except Exception as cleanup_err:
                  logger.error(f"{log_prefix} 清理檔案時發生錯誤: {cleanup_err}")
 
-        # 呼叫 play，並將清理函數傳遞給 after
         voice_client.play(source, after=lambda e, p=tmp_path: _cleanup(e, p))
-        playback_started = True # 設定標誌表示已呼叫 play()
+        playback_started = True
         logger.info(f"[{context}] 步驟 3 (開始播放) 耗時 {time.time()-step3:.4f}s (背景執行)")
         logger.info(f"[{context}] 從請求到開始播放總耗時: {time.time()-total_start:.4f}s")
 
@@ -146,7 +136,6 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
     except edge_tts.exceptions.UnexpectedStatusCode as e:
          logger.error(f"[{context}] Edge TTS 失敗: 非預期狀態碼 {e.status_code}。 文字: '{text[:50]}...'")
     except FileNotFoundError:
-        # 通常是 FFmpeg 執行檔找不到
         logger.error(f"[{context}] FFmpeg 錯誤: 找不到 FFmpeg 執行檔。請確保 FFmpeg 已安裝並在系統 PATH 中。")
     except discord.errors.ClientException as e:
         logger.error(f"[{context}] Discord 客戶端錯誤 (播放時): {e}")
@@ -154,8 +143,6 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         logger.exception(f"[{context}] play_tts 中發生非預期錯誤。 文字: '{text[:50]}...'")
 
     finally:
-        # --- 修改後的 Finally 區塊 ---
-        # 只有在播放從未成功開始 (playback_started 為 False) 且檔案存在時才清理
         if not playback_started and tmp_path and os.path.exists(tmp_path):
             logger.warning(f"[{context}][Finally] 播放未成功開始，清理暫存檔案: {tmp_path}")
             try:
