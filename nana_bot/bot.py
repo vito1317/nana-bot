@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import traceback
-from discord.ext.voice_recv.extras import SpeechRecognitionSink 
+from discord.ext.voice_recv.extras import SpeechRecognitionSink, BasicSink
 import discord.ext.voice_recv
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
@@ -879,6 +879,11 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
 @bot.tree.command(name='join', description="讓機器人加入語音並啟動 STT")
 @app_commands.guild_only()
 async def join(interaction: discord.Interaction):
+    vc.listen(
+        BasicSink(
+            callback=lambda user, packet: logger.info(f"[BasicSink] got packet from {user}: {len(packet.pcm)} bytes")
+        )
+    )
     user = interaction.user
     if not user.voice or not user.voice.channel:
         await interaction.response.send_message("您需要先加入一個語音頻道才能邀請我！", ephemeral=True)
@@ -892,15 +897,15 @@ async def join(interaction: discord.Interaction):
     )
     voice_clients[interaction.guild.id] = vc
 
-    sink = SpeechRecognitionSink(
-        process_cb=None,
-        default_recognizer="whisper",
-        text_cb=lambda results:
-            asyncio.create_task(
-                handle_result(results, interaction.channel, vc)
-            )
-    )
+    def dbg_process_cb(user_id, opus_data, pcm_data):
+        logger.debug(f"[SR-Process] user={user_id}, pcm_bytes={len(pcm_data)}")
 
+    sink = SpeechRecognitionSink(
+        process_cb=dbg_process_cb,
+        default_recognizer="whisper",
+        text_cb=lambda results: 
+            logger.info(f"[SR-Text] {results!r}") 
+    )
     vc.listen(sink)
     listening_guilds[interaction.guild.id] = vc
 
