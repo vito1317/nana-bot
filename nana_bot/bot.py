@@ -810,7 +810,7 @@ async def join(interaction: discord.Interaction):
                 logger.info(f"[STT] Bot already in channel {channel.id}, starting listening...")
                 try:
                     await interaction.response.defer(ephemeral=True, thinking=True)
-                    from discord.ext.voice_recv import sinks
+                    #from discord.ext.voice_recv import sinks
                     sink = sinks.WaveSink(destination="recordings")
                     voice_client.listen(sink, after=lambda err, s=sink: asyncio.create_task(after_listening(s, interaction.channel, voice_client)))
                     current_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, current_vc)))
