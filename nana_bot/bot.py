@@ -59,7 +59,7 @@ import io
 
 
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
-STT_ACTIVATION_WORD = "{bot_name}"
+STT_ACTIVATION_WORD = bot_name
 STT_LANGUAGE = "zh-TW"
 
 logging.basicConfig(level=logging.INFO if not debug else logging.DEBUG,
