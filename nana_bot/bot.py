@@ -592,10 +592,14 @@ def bot_run():
         await communicate.save(tmp_path)
 
         source = FFmpegPCMAudio(tmp_path)
-        voice_client.play(source)
+        def after_playing(error):
+            if error:
+                logger.error(f"播放時發生錯誤：{error}")
+            else:
+                logger.info("播放完成")
 
-        while voice_client.is_playing():
-            await asyncio.sleep(0.1)
+        voice_client.play(source, after=after_playing)
+
         try:
             os.remove(tmp_path)
         except OSError:
