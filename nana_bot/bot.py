@@ -897,7 +897,7 @@ async def join(interaction: discord.Interaction):
     # 把 text_cb 改成兩個參數：user_id, results
     sink = SpeechRecognitionSink(
         process_cb=None,
-        default_recognizer="whisper",
+        default_recognizer="google",
         text_cb=lambda user_id, results: 
             asyncio.run_coroutine_threadsafe(
                 handle_result(results, interaction.channel, vc),
