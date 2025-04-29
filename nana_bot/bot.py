@@ -4,7 +4,7 @@ import traceback
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
 import discord.sinks as sinks
-sink = sinks.WaveSink()
+sink = sinks.WaveSink(destination="recordings")
 from discord.ext.voice_recv import sinks
 from discord.ext import commands, tasks
 from typing import Optional, Dict
@@ -674,7 +674,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
         if guild_id in listening_guilds and listening_guilds[guild_id].is_connected():
             logger.debug(f"[STT] Restarting listening in guild {guild_id} (no audio data)")
             try:
-                 new_sink = sinks.WaveSink() # <--- 使用 sinks.WaveSink
+                 new_sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
                  listening_guilds[guild_id].listen(new_sink, after=lambda error, sink=new_sink: asyncio.create_task(after_listening(sink, channel, vc)))
             except Exception as e:
                  logger.error(f"[STT] Error restarting listening in guild {guild_id}: {e}")
@@ -708,7 +708,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
     if guild_id in listening_guilds and listening_guilds[guild_id].is_connected():
         logger.info(f"[STT] Restarting listening in guild {guild_id} after processing.")
         try:
-            new_sink = sinks.WaveSink() # <--- 使用 sinks.WaveSink
+            new_sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
             listening_guilds[guild_id].listen(new_sink, after=lambda error, sink=new_sink: asyncio.create_task(after_listening(sink, channel, vc)))
         except Exception as e:
             logger.error(f"[STT] Error restarting listening in guild {guild_id}: {e}")
@@ -788,7 +788,7 @@ def process_recognized_text(vc: discord.VoiceClient, user_id: int, user_name: st
     except Exception as stt_err:
         logger.exception(f"[STT_Worker] Unexpected error during speech recognition for {user_name}: {stt_err}")
 
-
+os.makedirs("recordings", exist_ok=True)
 @bot.tree.command(name='join', description="讓機器人加入您所在的語音頻道並開始監聽")
 @app_commands.guild_only()
 async def join(interaction: discord.Interaction):
@@ -811,7 +811,6 @@ async def join(interaction: discord.Interaction):
                 logger.info(f"[STT] Bot already in channel {channel.id}, starting listening...")
                 try:
                     await interaction.response.defer(ephemeral=True, thinking=True)
-                    os.makedirs("recordings", exist_ok=True)
                     from discord.ext.voice_recv import sinks
                     sink = sinks.WaveSink(destination="recordings")
                     voice_client.listen(sink, after=lambda err, s=sink: asyncio.create_task(after_listening(s, interaction.channel, voice_client)))
@@ -862,7 +861,7 @@ async def join(interaction: discord.Interaction):
         voice_clients[guild_id] = voice_client
 
         logger.info(f"[STT] Starting listening in channel {channel.name}...")
-        sink = sinks.WaveSink() # <--- 使用 sinks.WaveSink
+        sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
         voice_client.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, voice_client)))
         listening_guilds[guild_id] = voice_client
 
@@ -887,7 +886,7 @@ async def join(interaction: discord.Interaction):
                  if guild_id not in listening_guilds:
                      logger.info(f"[STT] Bot already connected, starting listening...")
                      try:
-                         sink = sinks.WaveSink() # <--- 使用 sinks.WaveSink
+                         sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
                          existing_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, existing_vc)))
                          listening_guilds[guild_id] = existing_vc
                          await interaction.followup.send(f"我似乎已經在 {existing_vc.channel.mention} 中了，現在開始聆聽！", ephemeral=True)
