@@ -20,6 +20,9 @@ from bs4 import BeautifulSoup
 import time
 import re
 import pytz
+import audioop
+from collections import defaultdict
+import logging
 try:
     from .commands import *
 except ImportError:
@@ -802,7 +805,9 @@ def process_recognized_text(vc: discord.VoiceClient, user_id: int, user_name: st
         logger.error(f"[STT_Worker] Could not request results from Google Speech Recognition service for {user_name}; {e}")
     except Exception as stt_err:
         logger.exception(f"[STT_Worker] Unexpected error during speech recognition for {user_name}: {stt_err}")
-
+buffers = defaultdict(bytearray)
+sample_width = 2
+silence_threshold = 500
 os.makedirs("recordings", exist_ok=True)
 async def handle_result(results: list, channel: discord.TextChannel, vc: discord.VoiceClient):
     if not results:
@@ -876,42 +881,41 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
 
         await play_tts(vc, reply, context="STT AI Response")
         await channel.send(reply)
-
-@bot.tree.command(name='join', description="讓機器人加入語音並啟動 STT")
-@app_commands.guild_only()
+@bot.tree.command(name='join', description="加入語音並開始聆聽")
 async def join(interaction: discord.Interaction):
     user = interaction.user
     if not user.voice or not user.voice.channel:
-        await interaction.response.send_message("您需要先加入語音頻道才能邀請我！", ephemeral=True)
+        await interaction.response.send_message("請先加入語音頻道！", ephemeral=True)
         return
 
-    # 連線
+    channel = interaction.channel
     vc = await user.voice.channel.connect(
         cls=voice_recv.VoiceRecvClient,
-        timeout=60.0,
-        reconnect=True,
-        self_deaf=False
+        timeout=60, reconnect=True, self_deaf=False
     )
-    voice_clients[interaction.guild.id] = vc
-
-    # 把 text_cb 改成兩個參數：user_id, results
-    sink = SpeechRecognitionSink(
-        process_cb=None,
-        default_recognizer="google",
-        text_cb=lambda user_id, results: 
-            asyncio.run_coroutine_threadsafe(
-                handle_result(results, interaction.channel, vc),
-                bot.loop
-            )
-    )
-
-    vc.listen(sink)
     listening_guilds[interaction.guild.id] = vc
 
-    await interaction.response.send_message(
-        f"已加入 {user.voice.channel.mention} 並啟用語音辨識！請說「{STT_ACTIVATION_WORD}」＋問題，我會以 TTS 回答。",
-        ephemeral=True
-    )
+    def process_cb(user_id, opus_data, pcm_data):
+        buffers[user_id] += pcm_data
+        rms = audioop.rms(pcm_data, sample_width)
+        if rms < silence_threshold:
+            return
+        audio = bytes(buffers[user_id])
+        buffers[user_id].clear()
+        asyncio.run_coroutine_threadsafe(
+            handle_result([audio], channel, vc),
+            bot.loop
+        )
+
+    def process_cb_callback(sink):
+        for user_id, audio in sink.audio_data.items():
+            pcm = audio.get_raw_data()
+            process_cb(user_id, None, pcm)
+
+    sink = make_wave_sink(interaction.guild.id)
+    vc.listen(sink, after=lambda err, s=sink: process_cb_callback(s))
+
+    await interaction.response.send_message("已加入語音並開始聆聽！", ephemeral=True)
 @bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
 @app_commands.guild_only()
 async def leave(interaction: discord.Interaction):
@@ -922,11 +926,11 @@ async def leave(interaction: discord.Interaction):
     if guild_id in listening_guilds:
         vc = listening_guilds[guild_id]
         if vc.is_connected():
-             try:
-                 vc.stop_listening()
-                 logger.info(f"[STT] Stopped listening in guild {guild_id} due to /leave command.")
-             except Exception as e:
-                 logger.error(f"[STT] Error stopping listening during leave: {e}")
+            try:
+                vc.stop_listening()
+                logger.info(f"[STT] Stopped listening in guild {guild_id} due to /leave command.")
+            except Exception as e:
+                logger.error(f"[STT] Error stopping listening during leave: {e}")
         del listening_guilds[guild_id]
 
 
@@ -934,7 +938,7 @@ async def leave(interaction: discord.Interaction):
     if not voice_client or not voice_client.is_connected():
         voice_client = discord.utils.get(bot.voice_clients, guild=guild)
         if voice_client and voice_client.is_connected():
-             logger.warning(f"本地字典未找到語音客戶端，但 discord.py 列表找到連接於 {voice_client.channel.name} (伺服器 {guild_id})。將嘗試斷開連接。")
+            logger.warning(f"本地字典未找到語音客戶端，但 discord.py 列表找到連接於 {voice_client.channel.name} (伺服器 {guild_id})。將嘗試斷開連接。")
         else:
             logger.info(f"使用者 {interaction.user.id} 使用 /leave，但機器人不在語音頻道中 (伺服器 {guild_id})。")
             await interaction.response.send_message("我目前不在任何語音頻道中。", ephemeral=True)
@@ -958,14 +962,14 @@ async def leave(interaction: discord.Interaction):
             await voice_client.disconnect(force=True)
             logger.info(f"已強制從語音頻道 {channel_name} 斷開連接 (伺服器 {guild_id})")
         except Exception as force_e:
-             logger.error(f"強制斷開連接失敗: {force_e}")
-             await interaction.followup.send(f"強制離開頻道 {channel_name} 也失敗了。", ephemeral=True)
+            logger.error(f"強制斷開連接失敗: {force_e}")
+            await interaction.followup.send(f"強制離開頻道 {channel_name} 也失敗了。", ephemeral=True)
     finally:
-         if guild_id in voice_clients:
-             del voice_clients[guild_id]
-             logger.debug(f"已從本地字典移除伺服器 {guild_id} 的語音客戶端條目。")
-         if guild_id in listening_guilds:
-             del listening_guilds[guild_id]
+        if guild_id in voice_clients:
+            del voice_clients[guild_id]
+            logger.debug(f"已從本地字典移除伺服器 {guild_id} 的語音客戶端條目。")
+        if guild_id in listening_guilds:
+            del listening_guilds[guild_id]
 
 
 @bot.tree.command(name='stop_listening', description="讓機器人停止監聽語音 (但保持在頻道中)")
