@@ -74,7 +74,13 @@ discord_logger.setLevel(logging.WARNING)
 recognizer = sr.Recognizer()
 
 listening_guilds: Dict[int, discord.VoiceClient] = {}
-
+def make_wave_sink(guild_id: int) -> sinks.WaveSink:
+    # 確保 recordings 資料夾存在
+    os.makedirs("recordings", exist_ok=True)
+    # 用 guild id 和 timestamp 產生唯一檔名
+    filename = f"{guild_id}_{int(time.time())}.wav"
+    path = os.path.join("recordings", filename)
+    return sinks.WaveSink(destination=path)
 async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
     total_start = time.time()
     if not voice_client or not voice_client.is_connected():
@@ -673,7 +679,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
         if guild_id in listening_guilds and listening_guilds[guild_id].is_connected():
             logger.debug(f"[STT] Restarting listening in guild {guild_id} (no audio data)")
             try:
-                 new_sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
+                 new_sink = make_wave_sink(vc.channel.guild.id)# <--- 使用 sinks.WaveSink
                  listening_guilds[guild_id].listen(new_sink, after=lambda error, sink=new_sink: asyncio.create_task(after_listening(sink, channel, vc)))
             except Exception as e:
                  logger.error(f"[STT] Error restarting listening in guild {guild_id}: {e}")
@@ -707,7 +713,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
     if guild_id in listening_guilds and listening_guilds[guild_id].is_connected():
         logger.info(f"[STT] Restarting listening in guild {guild_id} after processing.")
         try:
-            new_sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
+            new_sink = make_wave_sink(vc.channel.guild.id)# <--- 使用 sinks.WaveSink
             listening_guilds[guild_id].listen(new_sink, after=lambda error, sink=new_sink: asyncio.create_task(after_listening(sink, channel, vc)))
         except Exception as e:
             logger.error(f"[STT] Error restarting listening in guild {guild_id}: {e}")
@@ -860,7 +866,7 @@ async def join(interaction: discord.Interaction):
         voice_clients[guild_id] = voice_client
 
         logger.info(f"[STT] Starting listening in channel {channel.name}...")
-        sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
+        sink = make_wave_sink(guild.id)# <--- 使用 sinks.WaveSink
         voice_client.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, voice_client)))
         listening_guilds[guild_id] = voice_client
 
@@ -885,7 +891,7 @@ async def join(interaction: discord.Interaction):
                  if guild_id not in listening_guilds:
                      logger.info(f"[STT] Bot already connected, starting listening...")
                      try:
-                         sink = sinks.WaveSink(destination="recordings") # <--- 使用 sinks.WaveSink
+                         sink = make_wave_sink(guild.id)# <--- 使用 sinks.WaveSink
                          existing_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, existing_vc)))
                          listening_guilds[guild_id] = existing_vc
                          await interaction.followup.send(f"我似乎已經在 {existing_vc.channel.mention} 中了，現在開始聆聽！", ephemeral=True)
