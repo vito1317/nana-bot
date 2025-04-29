@@ -730,12 +730,22 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
     start_time = time.time()
 
     tmp_path = None
+    source = None
+    step1_duration = 0
+    step2_duration = 0
+    step3_call_duration = 0
+    time_between_1_and_2 = 0
+    time_between_2_and_3 = 0
+
     try:
         step1_start = time.time()
         communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
-        async with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-            tmp_path = tmp_file.name
-            await communicate.save(tmp_path)
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file_obj:
+            tmp_path = tmp_file_obj.name
+
+        await communicate.save(tmp_path)
+
         step1_end = time.time()
         step1_duration = step1_end - step1_start
         logger.info(f"[TTS-{guild_id}-{context}] Step 1 (Generate & Save) took: {step1_duration:.4f} seconds. File: {tmp_path}")
@@ -759,10 +769,10 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
 
         step3_start = time.time()
 
-        def after_playing(error):
+        def after_playing(error, path_to_delete=tmp_path, start_time_cb=start_time, step3_start_cb=step3_start):
             callback_end_time = time.time()
-            playback_duration = callback_end_time - step3_start
-            total_duration = callback_end_time - start_time
+            playback_duration = callback_end_time - step3_start_cb
+            total_duration = callback_end_time - start_time_cb
 
             if error:
                 logger.error(f"[TTS-{guild_id}-{context}] Playback error: {error}")
@@ -772,21 +782,17 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
             logger.info(f"[TTS-{guild_id}-{context}] Step 3 (Playback Duration) approx: {playback_duration:.4f} seconds.")
             logger.info(f"[TTS-{guild_id}-{context}] Total time (Start to Playback End): {total_duration:.4f} seconds.")
 
-            nonlocal tmp_path
-            if tmp_path and os.path.exists(tmp_path):
+            if path_to_delete and os.path.exists(path_to_delete):
                 step4_start = time.time()
                 try:
-                    os.remove(tmp_path)
+                    os.remove(path_to_delete)
                     step4_end = time.time()
                     step4_duration = step4_end - step4_start
-                    logger.info(f"[TTS-{guild_id}-{context}] Step 4 (Cleanup) took: {step4_duration:.4f} seconds. Removed: {tmp_path}")
+                    logger.info(f"[TTS-{guild_id}-{context}] Step 4 (Cleanup) took: {step4_duration:.4f} seconds. Removed: {path_to_delete}")
                 except OSError as e:
-                    logger.error(f"[TTS-{guild_id}-{context}] Error removing temporary file {tmp_path}: {e}")
-                finally:
-                     tmp_path = None
-            elif tmp_path:
-                 logger.warning(f"[TTS-{guild_id}-{context}] Temporary file {tmp_path} was already removed or not found during cleanup.")
-
+                    logger.error(f"[TTS-{guild_id}-{context}] Error removing temporary file {path_to_delete}: {e}")
+            elif path_to_delete:
+                 logger.warning(f"[TTS-{guild_id}-{context}] Temporary file {path_to_delete} was already removed or not found during cleanup.")
 
         if voice_client.is_playing():
             logger.warning(f"[TTS-{guild_id}-{context}] Voice client is already playing. Stopping previous playback.")
@@ -803,14 +809,11 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         logger.info(f"[TTS-{guild_id}-{context}] Time between Step 1 and 2: {time_between_1_and_2:.4f} seconds.")
         logger.info(f"[TTS-{guild_id}-{context}] Time between Step 2 and 3: {time_between_2_and_3:.4f} seconds.")
 
-
-    except edge_tts.NoAudioGenerated:
-        logger.error(f"[TTS-{guild_id}-{context}] edge-tts failed to generate audio for the text.")
-        if tmp_path and os.path.exists(tmp_path):
-            try: os.remove(tmp_path)
-            except OSError as e: logger.error(f"Error removing temp file after NoAudioGenerated: {e}")
     except FileNotFoundError:
          logger.error(f"[TTS-{guild_id}-{context}] FFmpeg executable not found. Please ensure FFmpeg is installed and in the system's PATH.")
+         if tmp_path and os.path.exists(tmp_path):
+             try: os.remove(tmp_path)
+             except OSError as e: logger.error(f"Error removing temp file after FileNotFoundError: {e}")
     except Exception as e:
         logger.exception(f"[TTS-{guild_id}-{context}] Unexpected error during TTS playback: {e}")
         if tmp_path and os.path.exists(tmp_path):
@@ -843,12 +846,12 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     elif before.channel == bot_channel and after.channel != bot_channel:
         user_name = member.display_name
         logger.info(f"User '{user_name}' (ID: {member.id}) left voice channel '{before.channel.name}' (ID: {before.channel.id}) where the bot was in guild {guild_id}.")
-        if len(before.channel.members) > 0 and bot.user in before.channel.members:
+        if bot.user in before.channel.members and len(before.channel.members) > 0:
              tts_message = f"{user_name} 離開了頻道"
              await asyncio.sleep(0.5)
              await play_tts(bot_voice_client, tts_message, context="User Leave Notification")
         else:
-             logger.info(f"Skipping leave notification for {user_name} as they might be the last user or bot is leaving.")
+             logger.info(f"Skipping leave notification for {user_name} as they might be the last user or bot is no longer in the channel.")
 
 
 @bot.event
@@ -1246,7 +1249,7 @@ async def on_message(message: discord.Message):
                             tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
                             tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
                             tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
-            
+                            tts_text_cleaned = re.sub(r'http[s]?://\S+', '網址', tts_text_cleaned)
                             tts_text_cleaned = re.sub(r'\s+', ' ', tts_text_cleaned).strip()
 
                             if tts_text_cleaned:
