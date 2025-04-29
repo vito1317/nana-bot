@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import traceback
+from discord.ext.voice_recv.extras import SpeechRecognitionSink 
 import discord.ext.voice_recv
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
@@ -57,6 +58,12 @@ import functools
 import speech_recognition as sr
 import io
 
+safety_settings = {
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH:      HarmBlockThreshold.BLOCK_NONE,  # 嚴格過濾仇恨言論
+    HarmCategory.HARM_CATEGORY_HARASSMENT:       HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,  # 過濾暴力或危險建議
+}
 
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
 STT_ACTIVATION_WORD = bot_name
@@ -725,6 +732,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
         if guild_id in listening_guilds: del listening_guilds[guild_id]
 
 
+
 def process_recognized_text(vc: discord.VoiceClient, user_id: int, user_name: str, audio_data: sr.AudioData):
     try:
         logger.debug(f"[STT_Worker] Recognizing text for {user_name}...")
@@ -794,144 +802,103 @@ def process_recognized_text(vc: discord.VoiceClient, user_id: int, user_name: st
         logger.error(f"[STT_Worker] Could not request results from Google Speech Recognition service for {user_name}; {e}")
     except Exception as stt_err:
         logger.exception(f"[STT_Worker] Unexpected error during speech recognition for {user_name}: {stt_err}")
-
+        
 os.makedirs("recordings", exist_ok=True)
-@bot.tree.command(name='join', description="讓機器人加入您所在的語音頻道並開始監聽")
-@app_commands.guild_only()
-async def join(interaction: discord.Interaction):
-    guild = interaction.guild
-    user = interaction.user
-    guild_id = guild.id
+async def handle_result(results: list, channel: discord.TextChannel, vc: discord.VoiceClient):
+    # 1. 如果沒有辨識結果就跳過
+    if not results:
+        return
+    text = results[-1].strip()
+    logger.info(f"[STT_Extras] Recognized via extras: {text!r}")
 
-    if not user.voice or not user.voice.channel:
-        await interaction.response.send_message("您需要先加入一個語音頻道才能邀請我！", ephemeral=True)
-        logger.debug(f"使用者 {user.id} 在伺服器 {guild_id} 嘗試使用 /join 但不在語音頻道中。")
+    # 2. 只處理包含啟動詞的語句
+    if STT_ACTIVATION_WORD.lower() not in text.lower():
+        return
+    query = text.lower().split(STT_ACTIVATION_WORD.lower(), 1)[1].strip()
+    if not query:
+        # 啟動詞後沒內容，提示重說
+        await play_tts(vc, "嗯？請問有什麼問題嗎？", context="STT Empty Query")
         return
 
-    channel = user.voice.channel
-    logger.info(f"使用者 {user.id} 請求加入伺服器 {guild_id} 的語音頻道 {channel.name} (ID: {channel.id})")
+    # 3. 組 initial_prompt / initial_response 跟聊天歷史（同 join 的做法）
+    timestamp = get_current_time_utc8()
+    initial_prompt = (
+        f"{bot_name}是一位使用 DBT 技巧的智能陪伴機器人，來自台灣，只能提供意見不能代替專業諮商。"
+        f"請以溫暖、口語化、易閱讀的繁體中文回答，控制在三段內，提供建議多於提問；"
+        f"會紀錄最近60則對話(舊在前)，格式為「時間戳 用戶名:內容」，但回應時不用模仿格式，也不要提及名稱／時間戳；"
+        f"@{bot.user.id}是你的ID，只接受繁體中文，收到其他語言請拒絕；"
+        f"如需搜尋網頁請建議 `/search` 或 `/aibrowse`；"
+        f"現在時間：{timestamp}；"
+        f"你({bot_name})生日9/12，創造者 vito1317，GitHub：https://github.com/vito1317/nana-bot 。"
+    )
+    initial_response = (
+        f"好的，我知道了。我是{bot_name}，一位台灣 DBT 智能陪伴機器人，生日9/12。"
+        f"我用溫暖、口語化的繁體中文回覆，控制三段內，提供意見多於提問；"
+        f"我會記住最近60則對話，@{bot.user.id}是我的ID，只接受繁體中文；"
+        f"如需搜尋或瀏覽網頁，我建議 `/search` 或 `/aibrowse`；"
+        f"現在時間：{timestamp}。"
+    )
 
-    current_vc = voice_clients.get(guild_id)
-    if current_vc and current_vc.is_connected():
-        if current_vc.channel == channel:
-            if guild_id not in listening_guilds:
-                logger.info(f"[STT] Bot already in channel {channel.id}, starting listening...")
-                try:
-                    await interaction.response.defer(ephemeral=True, thinking=True)
-                    #from discord.ext.voice_recv import sinks
-                    sink = sinks.WaveSink(destination="recordings")
-                    voice_client.listen(
-                        sink,
-                        after=lambda err, sink=sink: 
-                            asyncio.run_coroutine_threadsafe(
-                                after_listening(sink, interaction.channel, voice_client),
-                                bot.loop
-                            )
-                    )
+    chat_history_raw = get_chat_history()
+    history = [
+        {"role": "user",  "parts": [{"text": initial_prompt}]},
+        {"role": "model", "parts": [{"text": initial_response}]},
+    ]
+    for db_user, db_content, _ in chat_history_raw:
+        if not db_content:
+            continue
+        role = "model" if db_user == bot_name else "user"
+        history.append({"role": role, "parts": [{"text": db_content}]})
 
-                    current_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, current_vc)))
-                    listening_guilds[guild_id] = current_vc
-                    await interaction.followup.send(f"我已經在 {channel.mention} 了，現在開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。", ephemeral=True)
-                except Exception as e:
-                    logger.error(f"[STT] Error starting listening on existing connection: {e}")
-                    await interaction.followup.send("嘗試開始聆聽時發生錯誤。", ephemeral=True)
-            else:
-                 await interaction.response.send_message(f"我已經在 {channel.mention} 並且正在聆聽了。", ephemeral=True)
+    # 4. 用 channel.typing 包裝思考時間
+    async with channel.typing():
+        if not model:
+            await play_tts(vc, "抱歉，AI 核心未初始化，無法回應。", context="STT AI Unavailable")
             return
-        else:
-            logger.info(f"機器人正在從 {current_vc.channel.name} 移動到 {channel.name} (伺服器 {guild_id})")
-            try:
-                await interaction.response.defer(ephemeral=False, thinking=True)
-                if guild_id in listening_guilds:
-                    current_vc.stop_listening()
-                    del listening_guilds[guild_id]
-                    logger.info(f"[STT] Stopped listening in old channel {current_vc.channel.name}")
 
-                await current_vc.move_to(channel)
-                voice_clients[guild_id] = guild.voice_client
-                vc = guild.voice_client
-
-                logger.info(f"[STT] Starting listening in new channel {channel.name}...")
-                sink = sinks.WaveSink(destination="recordings")
-                vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, vc)))
-                listening_guilds[guild_id] = vc
-
-                await interaction.followup.send(f"已移動到您的頻道: {channel.mention} 並開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。")
-                logger.info(f"機器人成功移動到頻道 {channel.id} 並開始監聽 (伺服器 {guild_id})")
-                return
-            except asyncio.TimeoutError:
-                 logger.error(f"移動機器人到頻道 {channel.id} 超時 (伺服器 {guild_id})")
-                 await interaction.followup.send("移動頻道超時，請稍後再試。", ephemeral=True)
-                 return
-            except Exception as e:
-                 logger.exception(f"移動機器人到頻道 {channel.id} 時發生錯誤 (伺服器 {guild_id}): {e}")
-                 await interaction.followup.send(f"移動頻道時發生錯誤: {e}", ephemeral=True)
-                 if guild_id in listening_guilds: del listening_guilds[guild_id]
-                 return
-
-    logger.info(f"嘗試連接到語音頻道 {channel.id} (伺服器 {guild_id})")
-    try:
-        await interaction.response.defer(ephemeral=False, thinking=True)
-        voice_client = await channel.connect(
-            cls=voice_recv.VoiceRecvClient,
-            timeout=60.0,
-            reconnect=True,
-            self_deaf=False
+        # 5. 呼叫 AI 並拿到文字回覆
+        chat = model.start_chat(history=history)
+        response = await chat.send_message_async(
+            query,
+            stream=False,
+            safety_settings=safety_settings
         )
-        
-        voice_clients[guild_id] = voice_client
+        reply = response.text.strip() if response.candidates else "抱歉，我暫時無法回答。"
 
-        logger.info(f"[STT] Starting listening in channel {channel.name}...")
-        sink = make_wave_sink(guild.id)# <--- 使用 sinks.WaveSink
-        voice_client.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, voice_client)))
-        listening_guilds[guild_id] = voice_client
+        # 6. 同時 TTS 播放並在文字頻道回覆
+        await play_tts(vc, reply, context="STT AI Response")
+        await channel.send(reply)
 
-        await interaction.followup.send(f"成功加入語音頻道: {channel.mention} 並開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。")
-        logger.info(f"機器人成功加入語音頻道 {channel.id} 並開始監聽 (伺服器 {guild_id})")
+# /join 裡面維持不變，只要確保用 SpeechRecognitionSink 指定 callback
+@bot.tree.command(name='join', description="讓機器人加入語音並啟動 STT")
+@app_commands.guild_only()
+async def join(interaction: discord.Interaction):
+    user = interaction.user
+    if not user.voice or not user.voice.channel:
+        await interaction.response.send_message("您需要先加入一個語音頻道才能邀請我！", ephemeral=True)
+        return
 
-    except asyncio.TimeoutError:
-        logger.error(f"連接到語音頻道 {channel.name} (ID: {channel.id}) 超時 (伺服器 {guild_id})")
-        try:
-            await interaction.followup.send("加入語音頻道超時，請檢查我的權限或稍後再試。", ephemeral=True)
-        except discord.NotFound:
-             logger.warning(f"無法發送 followup (interaction 可能已超時), 嘗試在頻道 {interaction.channel.name} 發送訊息。")
-             try: await interaction.channel.send(f"{user.mention} 加入語音頻道超時。")
-             except discord.HTTPException as ch_e: logger.error(f"在頻道 {interaction.channel.name} 發送超時訊息失敗: {ch_e}")
-    except discord.errors.ClientException as e:
-        logger.error(f"加入語音頻道 {channel.id} 時發生客戶端錯誤 (伺服器 {guild_id}): {e}")
-        if "Already connected" in str(e):
-             existing_vc = discord.utils.get(bot.voice_clients, guild=guild)
-             if existing_vc and existing_vc.is_connected():
-                 voice_clients[guild_id] = existing_vc
-                 logger.warning(f"客戶端錯誤提示已連接，但本地字典未記錄。已更新字典。機器人位於 {existing_vc.channel.name}")
-                 if guild_id not in listening_guilds:
-                     logger.info(f"[STT] Bot already connected, starting listening...")
-                     try:
-                         sink = make_wave_sink(guild.id)# <--- 使用 sinks.WaveSink
-                         existing_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, existing_vc)))
-                         listening_guilds[guild_id] = existing_vc
-                         await interaction.followup.send(f"我似乎已經在 {existing_vc.channel.mention} 中了，現在開始聆聽！", ephemeral=True)
-                     except Exception as listen_err:
-                         logger.error(f"[STT] Error starting listening on existing connection: {listen_err}")
-                         await interaction.followup.send("嘗試開始聆聽時發生錯誤。", ephemeral=True)
-                 else:
-                     await interaction.followup.send(f"我似乎已經在語音頻道 {existing_vc.channel.mention} 中並且正在聆聽了。", ephemeral=True)
-             else:
-                 logger.error(f"客戶端錯誤提示已連接，但無法找到活動連接。")
-                 await interaction.followup.send(f"加入語音頻道時發生狀態不一致錯誤，請嘗試使用 /leave 後再重新加入。", ephemeral=True)
-        else:
-            await interaction.followup.send(f"加入語音頻道時發生客戶端錯誤: {e}", ephemeral=True)
-    except discord.errors.Forbidden:
-         logger.error(f"權限錯誤: 無法加入語音頻道 {channel.id} (伺服器 {guild_id})。請檢查 '連接' 和 '說話' 權限。")
-         await interaction.followup.send(f"我沒有權限加入頻道 {channel.mention}。請檢查我的「連接」和「說話」權限。", ephemeral=True)
-    except Exception as e:
-        logger.exception(f"加入語音頻道 {channel.name} (ID: {channel.id}) 時發生非預期錯誤 (伺服器 {guild_id}): {e}")
-        try:
-            await interaction.followup.send(f"加入語音頻道時發生非預期的錯誤。", ephemeral=True)
-        except discord.NotFound:
-            logger.warning(f"無法發送 followup (interaction 可能已超時), 嘗試在頻道 {interaction.channel.name} 發送訊息。")
-            try: await interaction.channel.send(f"{user.mention} 加入語音頻道時發生非預期的錯誤。")
-            except discord.HTTPException as ch_e: logger.error(f"在頻道 {interaction.channel.name} 發送錯誤訊息失敗: {ch_e}")
+    vc = await user.voice.channel.connect(
+        cls=voice_recv.VoiceRecvClient,
+        timeout=60.0,
+        reconnect=True,
+        self_deaf=False
+    )
+    voice_clients[interaction.guild.id] = vc
+
+    sink = SpeechRecognitionSink(
+        recognizer,
+        language=STT_LANGUAGE,
+        callback=lambda results: handle_result(results, interaction.channel, vc)
+    )
+    vc.listen(sink)
+    listening_guilds[interaction.guild.id] = vc
+
+    await interaction.response.send_message(
+        f"已加入 {user.voice.channel.mention} 並啟用語音辨識！請說「{STT_ACTIVATION_WORD}」＋問題，我會用 TTS 回答。", 
+        ephemeral=True
+    )
+
 
 
 @bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
@@ -1352,8 +1319,8 @@ async def on_message(message: discord.Message):
                         logger.warning(f"跳過聊天歷史中的空訊息 (伺服器 {guild_id})，來自使用者 {db_user} 於 {db_timestamp}")
 
                 if debug:
-                    logger.debug(f"--- 傳送給 API 的聊天歷史 (最近 5 則) (伺服器: {guild_id}) ---")
-                    for entry in chat_history_processed[-5:]:
+                    logger.debug(f"--- 傳送給 API 的聊天歷史 (最近 30 則) (伺服器: {guild_id}) ---")
+                    for entry in chat_history_processed[-30:]:
                         try:
                             part_text = str(entry['parts'][0]['text'])[:100] + ('...' if len(str(entry['parts'][0]['text'])) > 100 else '')
                             logger.debug(f"角色: {entry['role']}, 內容: {part_text}")

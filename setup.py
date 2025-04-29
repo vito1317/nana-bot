@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.8.9.9",
+    version="5.8.9",
     license="MIT",
     author="Vito1317",
     author_email="service@vito95311.online",
@@ -37,7 +37,7 @@ setuptools.setup(
         "edge_tts",
         "SpeechRecognition",
         "py-cord",
-        "discord-ext-voice-recv",
+        "discord-ext-voice-recv[extras]",
         #"discord-ext-voice-recv @ git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git@main",
         "discord.py[voice]==2.5.2"
         ],
