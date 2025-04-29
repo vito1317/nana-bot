@@ -96,6 +96,36 @@ def init_tts_engine():
         tts_engine = None
         return None
 '''
+async def play_tts(voice_client, text: str, context: str = "TTS"):
+        total_start = time.time()
+        logger.info(f"[{context}] Starting TTS for: '{text}'")
+
+        step1 = time.time()
+        communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+        await communicate.save(tmp_path)
+        logger.info(f"[{context}] Step1 (generate) took {time.time()-step1:.4f}s -> {tmp_path}")
+
+        step2 = time.time()
+        source = FFmpegPCMAudio(tmp_path, before_options="", options=None)
+        logger.info(f"[{context}] Step2 (create source) took {time.time()-step2:.4f}s")
+
+        if voice_client.is_playing():
+            voice_client.stop()
+
+        step3 = time.time()
+        def _cleanup(path, error):
+            try:
+                os.remove(path)
+                logger.info(f"[{context}] Cleaned up {path}")
+            except OSError:
+                logger.warning(f"[{context}] Cleanup failed, file not found: {path}")
+
+        voice_client.play(source, after=lambda err, path=tmp_path: _cleanup(path, err))
+        logger.info(f"[{context}] Step3 (play) took {time.time()-step3:.4f}s (started background)")
+        logger.info(f"[{context}] Total to playback start: {time.time()-total_start:.4f}s")
+
 def get_current_time_utc8():
     utc8 = timezone(timedelta(hours=8))
     current_time = datetime.now(utc8)
@@ -719,36 +749,7 @@ async def leave(interaction: discord.Interaction):
             await interaction.response.send_message("我目前不在任何語音頻道中。", ephemeral=True)
 
 
-    async def play_tts(voice_client, text: str, context: str = "TTS"):
-        total_start = time.time()
-        logger.info(f"[{context}] Starting TTS for: '{text}'")
-
-        step1 = time.time()
-        communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-            tmp_path = tmp.name
-        await communicate.save(tmp_path)
-        logger.info(f"[{context}] Step1 (generate) took {time.time()-step1:.4f}s -> {tmp_path}")
-
-        step2 = time.time()
-        source = FFmpegPCMAudio(tmp_path, before_options="", options=None)
-        logger.info(f"[{context}] Step2 (create source) took {time.time()-step2:.4f}s")
-
-        if voice_client.is_playing():
-            voice_client.stop()
-
-        step3 = time.time()
-        def _cleanup(path, error):
-            try:
-                os.remove(path)
-                logger.info(f"[{context}] Cleaned up {path}")
-            except OSError:
-                logger.warning(f"[{context}] Cleanup failed, file not found: {path}")
-
-        voice_client.play(source, after=lambda err, path=tmp_path: _cleanup(path, err))
-        logger.info(f"[{context}] Step3 (play) took {time.time()-step3:.4f}s (started background)")
-        logger.info(f"[{context}] Total to playback start: {time.time()-total_start:.4f}s")
-
+    
     @bot.event
     async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
         """監聽成員語音狀態變化，用於播放加入/離開提示音"""
