@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import traceback
+import discord.ext.voice_recv
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
 #import discord.sinks as sinks
