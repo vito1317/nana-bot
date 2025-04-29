@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.8.9",
+    version="5.8.8.9.1",
     license="MIT",
     author="Vito1317",
     author_email="service@vito95311.online",
@@ -35,7 +35,9 @@ setuptools.setup(
         "google-cloud-texttospeech",
         "torchaudio",
         "edge_tts",
-        "SpeechRecognition"
+        "SpeechRecognition",
+        "py-cord",
+        "discord-ext-voice-recv[extras]"
         ],
     entry_points={
         'console_scripts': [

@@ -2,7 +2,10 @@
 import asyncio
 import traceback
 import discord
-from discord import app_commands, FFmpegPCMAudio, AudioSource, sinks
+from discord import app_commands, FFmpegPCMAudio, AudioSource
+import discord.sinks as sinks
+sink = sinks.WaveSink()
+from discord.ext.voice_recv import sinks
 from discord.ext import commands, tasks
 from typing import Optional, Dict
 import sqlite3

@@ -13,3 +13,5 @@ google-cloud-texttospeech
 torchaudio
 edge_tts
 SpeechRecognition
+py-cord
+discord-ext-voice-recv[extras]
