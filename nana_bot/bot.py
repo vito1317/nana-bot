@@ -880,41 +880,51 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
 @bot.tree.command(name='join', description="讓機器人加入語音並啟動 STT")
 @app_commands.guild_only()
 async def join(interaction: discord.Interaction):
-    vc.listen(
-        BasicSink(
-            callback=lambda user, packet: logger.info(f"[BasicSink] got packet from {user}: {len(packet.pcm)} bytes")
-        )
-    )
     user = interaction.user
     if not user.voice or not user.voice.channel:
-        await interaction.response.send_message("您需要先加入一個語音頻道才能邀請我！", ephemeral=True)
+        await interaction.response.send_message("您需要先加入語音頻道才能邀請我！", ephemeral=True)
         return
 
-    vc = await user.voice.channel.connect(
-        cls=voice_recv.VoiceRecvClient,
-        timeout=60.0,
-        reconnect=True,
-        self_deaf=False
-    )
+    channel = user.voice.channel
+
+    # 1. 嘗試連線，若 Already Connected，就取現有的
+    try:
+        vc = await channel.connect(
+            cls=voice_recv.VoiceRecvClient,
+            timeout=60.0,
+            reconnect=True,
+            self_deaf=False
+        )
+        logger.info(f"已連上語音頻道 {channel.name} (新連線)")
+    except discord.ClientException as e:
+        # 如果機器人已在頻道中，抓現有的
+        vc = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+        logger.info(f"使用已存在的語音連線: {vc.channel.name}" if vc else "尚未在任何語音頻道")
+        if vc is None:
+            await interaction.response.send_message("連線失敗，請稍後再試。", ephemeral=True)
+            return
+
     voice_clients[interaction.guild.id] = vc
 
-    def dbg_process_cb(user_id, opus_data, pcm_data):
-        logger.debug(f"[SR-Process] user={user_id}, pcm_bytes={len(pcm_data)}")
+    # 2. 測試 vc 是否真的是 VoiceRecvClient
+    logger.info(f"Voice client 類別：{type(vc)}")
+    # 必須是 discord.ext.voice_recv.VoiceRecvClient 才能用 listen()
 
+    # 3. 啟動 SpeechRecognitionSink
     sink = SpeechRecognitionSink(
-        process_cb=dbg_process_cb,
+        process_cb=None,
         default_recognizer="whisper",
-        text_cb=lambda results: 
-            logger.info(f"[SR-Text] {results!r}") 
+        text_cb=lambda results: asyncio.create_task(
+            handle_result(results, interaction.channel, vc)
+        )
     )
     vc.listen(sink)
     listening_guilds[interaction.guild.id] = vc
 
     await interaction.response.send_message(
-        f"已加入 {user.voice.channel.mention} 並啟用語音辨識！請說「{STT_ACTIVATION_WORD}」＋問題，我會用 TTS 回答。", 
+        f"已加入 {channel.mention} 並啟用語音辨識！請說「{STT_ACTIVATION_WORD}」＋問題，我會以 TTS 回答。",
         ephemeral=True
     )
-
 
 @bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
 @app_commands.guild_only()
