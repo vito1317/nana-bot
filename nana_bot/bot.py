@@ -719,609 +719,501 @@ async def leave(interaction: discord.Interaction):
             await interaction.response.send_message("我目前不在任何語音頻道中。", ephemeral=True)
 
 
-async def play_tts(voice_client, text: str, context: str = "TTS"):
-    total_start = time.time()
-    logger.info(f"[{context}] Starting TTS playback for text: '{text}'")
+    async def play_tts(voice_client, text: str, context: str = "TTS"):
+        total_start = time.time()
+        logger.info(f"[{context}] Starting TTS for: '{text}'")
 
-    step1_start = time.time()
-    communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        tmp_path = tmp.name
-    await communicate.save(tmp_path)
-    step1_end = time.time()
-    logger.info(f"[{context}] Step 1 (Generate & Save) took: {step1_end - step1_start:.4f} seconds. File: {tmp_path}")
-
-    step2_start = time.time()
-    source = FFmpegPCMAudio(
-        tmp_path,
-        before_options="",
-        options=None
-    )
-    step2_end = time.time()
-    logger.info(f"[{context}] Step 2 (Create Source) took: {step2_end - step2_start:.4f} seconds.")
-
-    logger.info(f"[{context}] Time between Step 1 and 2: {step2_start - step1_end:.4f} seconds.")
-
-    step3_start = time.time()
-    def _cleanup(error):
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-
-    voice_client.play(source, after=lambda e: _cleanup(e))
-    step3_end = time.time()
-    logger.info(f"[{context}] Step 3 (Initiate Playback) took: {step3_end - step3_start:.4f} seconds. Playback started in background.")
-
-    logger.info(f"[{context}] Time between Step 2 and 3: {step3_start - step2_end:.4f} seconds.")
-
-    total_elapsed = time.time() - total_start
-    logger.info(f"[{context}] Total time (Start to Playback Initiated): {total_elapsed:.4f} seconds.")
-    if not voice_client or not voice_client.is_connected():
-        logger.warning(f"play_tts called but voice_client is invalid or not connected (Context: {context}).")
-        return
-
-    guild_id = voice_client.guild.id
-    logger.info(f"[TTS-{guild_id}-{context}] Starting TTS playback for text: '{text[:50]}...'")
-    start_time = time.time()
-
-    tmp_path = None
-    source = None
-    step1_duration = 0
-    step2_duration = 0
-    step3_call_duration = 0
-    time_between_1_and_2 = 0
-    time_between_2_and_3 = 0
-
-    try:
-        step1_start = time.time()
+        step1 = time.time()
         communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
-
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file_obj:
-            tmp_path = tmp_file_obj.name
-
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
         await communicate.save(tmp_path)
+        logger.info(f"[{context}] Step1 (generate) took {time.time()-step1:.4f}s -> {tmp_path}")
 
-        step1_end = time.time()
-        step1_duration = step1_end - step1_start
-        logger.info(f"[TTS-{guild_id}-{context}] Step 1 (Generate & Save) took: {step1_duration:.4f} seconds. File: {tmp_path}")
-
-        step2_start = time.time()
-        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
-             logger.error(f"[TTS-{guild_id}-{context}] Error: Temporary TTS file is missing or empty at {tmp_path}")
-             if tmp_path and os.path.exists(tmp_path):
-                 try: os.remove(tmp_path)
-                 except OSError as e: logger.error(f"Error removing empty temp file {tmp_path}: {e}")
-             return
-
-        ffmpeg_options = {
-            'options': '-vn',
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
-        }
-        source = FFmpegPCMAudio(tmp_path, **ffmpeg_options)
-        step2_end = time.time()
-        step2_duration = step2_end - step2_start
-        logger.info(f"[TTS-{guild_id}-{context}] Step 2 (Create Source) took: {step2_duration:.4f} seconds.")
-
-        step3_start = time.time()
-
-        def after_playing(error, path_to_delete=tmp_path, start_time_cb=start_time, step3_start_cb=step3_start):
-            callback_end_time = time.time()
-            playback_duration = callback_end_time - step3_start_cb
-            total_duration = callback_end_time - start_time_cb
-
-            if error:
-                logger.error(f"[TTS-{guild_id}-{context}] Playback error: {error}")
-            else:
-                logger.info(f"[TTS-{guild_id}-{context}] Playback finished successfully.")
-
-            logger.info(f"[TTS-{guild_id}-{context}] Step 3 (Playback Duration) approx: {playback_duration:.4f} seconds.")
-            logger.info(f"[TTS-{guild_id}-{context}] Total time (Start to Playback End): {total_duration:.4f} seconds.")
-
-            if path_to_delete and os.path.exists(path_to_delete):
-                step4_start = time.time()
-                try:
-                    os.remove(path_to_delete)
-                    step4_end = time.time()
-                    step4_duration = step4_end - step4_start
-                    logger.info(f"[TTS-{guild_id}-{context}] Step 4 (Cleanup) took: {step4_duration:.4f} seconds. Removed: {path_to_delete}")
-                except OSError as e:
-                    logger.error(f"[TTS-{guild_id}-{context}] Error removing temporary file {path_to_delete}: {e}")
-            elif path_to_delete:
-                 logger.warning(f"[TTS-{guild_id}-{context}] Temporary file {path_to_delete} was already removed or not found during cleanup.")
+        step2 = time.time()
+        source = FFmpegPCMAudio(tmp_path, before_options="", options=None)
+        logger.info(f"[{context}] Step2 (create source) took {time.time()-step2:.4f}s")
 
         if voice_client.is_playing():
-            logger.warning(f"[TTS-{guild_id}-{context}] Voice client is already playing. Stopping previous playback.")
             voice_client.stop()
-            await asyncio.sleep(0.2)
 
-        voice_client.play(source, after=after_playing)
-        step3_end_call = time.time()
-        step3_call_duration = step3_end_call - step3_start
-        logger.info(f"[TTS-{guild_id}-{context}] Step 3 (Initiate Playback) call took: {step3_call_duration:.4f} seconds. Playback started in background.")
-
-        time_between_1_and_2 = step2_start - step1_end
-        time_between_2_and_3 = step3_start - step2_end
-        logger.info(f"[TTS-{guild_id}-{context}] Time between Step 1 and 2: {time_between_1_and_2:.4f} seconds.")
-        logger.info(f"[TTS-{guild_id}-{context}] Time between Step 2 and 3: {time_between_2_and_3:.4f} seconds.")
-
-    except FileNotFoundError:
-         logger.error(f"[TTS-{guild_id}-{context}] FFmpeg executable not found. Please ensure FFmpeg is installed and in the system's PATH.")
-         if tmp_path and os.path.exists(tmp_path):
-             try: os.remove(tmp_path)
-             except OSError as e: logger.error(f"Error removing temp file after FileNotFoundError: {e}")
-    except Exception as e:
-        logger.exception(f"[TTS-{guild_id}-{context}] Unexpected error during TTS playback: {e}")
-        if tmp_path and os.path.exists(tmp_path):
-            try: os.remove(tmp_path)
-            except OSError as e: logger.error(f"Error removing temp file after unexpected error: {e}")
-
-
-@bot.event
-async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    """監聽成員語音狀態變化，用於播放加入/離開提示音"""
-    guild = member.guild
-    guild_id = guild.id
-
-    bot_voice_client = voice_clients.get(guild_id)
-    if member.id == bot.user.id or not bot_voice_client or not bot_voice_client.is_connected():
-        return
-
-    bot_channel = bot_voice_client.channel
-
-    if before.channel != bot_channel and after.channel == bot_channel:
-        user_name = member.display_name
-        logger.info(f"User '{user_name}' (ID: {member.id}) joined voice channel '{after.channel.name}' (ID: {after.channel.id}) where the bot is in guild {guild_id}.")
-        if len(bot_channel.members) > 1:
-            tts_message = f"{user_name} 加入了頻道"
-            await asyncio.sleep(0.5)
-            await play_tts(bot_voice_client, tts_message, context="User Join Notification")
-        else:
-            logger.info(f"Skipping join notification for {user_name} as they are the first user with the bot.")
-
-    elif before.channel == bot_channel and after.channel != bot_channel:
-        user_name = member.display_name
-        logger.info(f"User '{user_name}' (ID: {member.id}) left voice channel '{before.channel.name}' (ID: {before.channel.id}) where the bot was in guild {guild_id}.")
-        if bot.user in before.channel.members and len(before.channel.members) > 0:
-             tts_message = f"{user_name} 離開了頻道"
-             await asyncio.sleep(0.5)
-             await play_tts(bot_voice_client, tts_message, context="User Leave Notification")
-        else:
-             logger.info(f"Skipping leave notification for {user_name} as they might be the last user or bot is no longer in the channel.")
-
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author == bot.user:
-        return
-
-    if not message.guild:
-        return
-
-    guild = message.guild
-    guild_id = guild.id
-    channel = message.channel
-    author = message.author
-    user_id = author.id
-    user_name = author.display_name
-
-    if WHITELISTED_SERVERS and guild_id not in WHITELISTED_SERVERS:
-        return
-
-    analytics_db_path = get_db_path(guild_id, 'analytics')
-    chat_db_path = get_db_path(guild_id, 'chat')
-    points_db_path = get_db_path(guild_id, 'points')
-
-
-    def update_user_message_count(user_id_str, user_name_str, join_date_iso):
-        conn = None
-        try:
-            conn = sqlite3.connect(analytics_db_path, timeout=10)
-            c = conn.cursor()
-            c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)")
-            c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id_str,))
-            result = c.fetchone()
-            if result:
-                c.execute("UPDATE users SET message_count = message_count + 1, user_name = ? WHERE user_id = ?", (user_name_str, user_id_str))
-            else:
-                join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
-                c.execute("INSERT OR IGNORE INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1))
-            conn.commit()
-        except sqlite3.Error as e: logger.exception(f"DB error in update_user_message_count for user {user_id_str} in guild {guild_id}: {e}")
-        finally:
-            if conn: conn.close()
-
-    def update_token_in_db(total_token_count, userid_str, channelid_str):
-        if not total_token_count or not userid_str or not channelid_str:
-            logger.warning(f"Missing data for update_token_in_db (guild {guild_id}): tokens={total_token_count}, user={userid_str}, channel={channelid_str}")
-            return
-        conn = None
-        try:
-            conn = sqlite3.connect(analytics_db_path, timeout=10)
-            c = conn.cursor()
-            c.execute("""CREATE TABLE IF NOT EXISTS metadata (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        userid TEXT UNIQUE,
-                        total_token_count INTEGER,
-                        channelid TEXT)""")
-            c.execute("""INSERT INTO metadata (userid, total_token_count, channelid)
-                         VALUES (?, ?, ?)
-                         ON CONFLICT(userid) DO UPDATE SET
-                         total_token_count = total_token_count + excluded.total_token_count,
-                         channelid = excluded.channelid""",
-                      (userid_str, total_token_count, channelid_str))
-            conn.commit()
-            logger.debug(f"Updated token count for user {userid_str} in guild {guild_id}. Added: {total_token_count}")
-        except sqlite3.Error as e: logger.exception(f"DB error in update_token_in_db for user {userid_str} in guild {guild_id}: {e}")
-        finally:
-            if conn: conn.close()
-
-    def store_message(user_str, content_str, timestamp_str):
-        if not content_str: return
-        conn = None
-        try:
-            conn = sqlite3.connect(chat_db_path, timeout=10)
-            c = conn.cursor()
-            c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
-            c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
-            c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
-            conn.commit()
-            logger.debug(f"Stored message from '{user_str}' in chat history for guild {guild_id}")
-        except sqlite3.Error as e: logger.exception(f"DB error in store_message for guild {guild_id}: {e}")
-        finally:
-            if conn: conn.close()
-
-    def get_chat_history():
-        conn = None
-        history = []
-        try:
-            conn = sqlite3.connect(chat_db_path, timeout=10)
-            c = conn.cursor()
-            c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
-            c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
-            rows = c.fetchall()
-            history = rows
-            logger.debug(f"Retrieved {len(history)} messages from chat history for guild {guild_id}")
-        except sqlite3.Error as e: logger.exception(f"DB error in get_chat_history for guild {guild_id}: {e}")
-        finally:
-            if conn: conn.close()
-        return history
-
-    def get_user_points(user_id_str, user_name_str=None, join_date_iso=None):
-        conn = None
-        points = 0
-        try:
-            conn = sqlite3.connect(points_db_path, timeout=10)
-            cursor = conn.cursor()
-            cursor.execute(f"CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points})")
-            cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
-            result = cursor.fetchone()
-            if result:
-                points = int(result[0])
-            elif default_points >= 0 and user_name_str:
-                join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
-                logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB (guild {guild_id}). Creating with {default_points} points.")
-                cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
-                cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
-                if default_points > 0:
-                    cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
-                conn.commit()
-                points = default_points
-            else:
-                 logger.debug(f"User {user_id_str} not found in points DB (guild {guild_id}) and default points are negative. Returning 0 points.")
-
-        except sqlite3.Error as e: logger.exception(f"DB error in get_user_points for user {user_id_str} in guild {guild_id}: {e}")
-        except ValueError: logger.error(f"Value error converting points for user {user_id_str} in guild {guild_id}.")
-        finally:
-            if conn: conn.close()
-        return points
-
-    def deduct_points(user_id_str, points_to_deduct, reason="與機器人互動扣點"):
-        if points_to_deduct <= 0: return get_user_points(user_id_str)
-        conn = None
-        current_points = get_user_points(user_id_str)
-        try:
-            conn = sqlite3.connect(points_db_path, timeout=10)
-            cursor = conn.cursor()
-            cursor.execute(f"CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points})")
-            cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
-
-            cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
-            result = cursor.fetchone()
-            if not result:
-                logger.warning(f"User {user_id_str} not found in points DB for deduction (guild {guild_id}). Cannot deduct points.")
-                return 0
-
-            current_points_db = int(result[0])
-            if current_points_db < points_to_deduct:
-                logger.warning(f"User {user_id_str} has insufficient points ({current_points_db}) to deduct {points_to_deduct} in guild {guild_id}.")
-                return current_points_db
-
-            new_points = current_points_db - points_to_deduct
-            cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, user_id_str))
-            cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, -points_to_deduct, reason, get_current_time_utc8()))
-            conn.commit()
-            logger.info(f"Deducted {points_to_deduct} points from user {user_id_str} for '{reason}' in guild {guild_id}. New balance: {new_points}")
-            return new_points
-        except sqlite3.Error as e: logger.exception(f"DB error in deduct_points for user {user_id_str} in guild {guild_id}: {e}")
-        finally:
-            if conn: conn.close()
-        return current_points
-
-
-    conn_analytics_msg = None
-    try:
-        conn_analytics_msg = sqlite3.connect(analytics_db_path, timeout=10)
-        c_analytics_msg = conn_analytics_msg.cursor()
-        c_analytics_msg.execute("CREATE TABLE IF NOT EXISTS messages (message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)")
-        msg_time_utc = message.created_at.astimezone(timezone.utc).isoformat()
-        c_analytics_msg.execute("INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) VALUES (?, ?, ?, ?, ?)",
-                                (str(user_id), user_name, str(channel.id), msg_time_utc, message.content))
-        conn_analytics_msg.commit()
-    except sqlite3.Error as e: logger.exception(f"DB error inserting message into analytics table for guild {guild_id}: {e}")
-    finally:
-        if conn_analytics_msg: conn_analytics_msg.close()
-
-    join_date_iso = None
-    if isinstance(author, discord.Member) and author.joined_at:
-        try:
-            join_date_iso = author.joined_at.astimezone(timezone.utc).isoformat()
-        except Exception as e: logger.error(f"Error converting join date for user {user_id} in guild {guild_id}: {e}")
-    update_user_message_count(str(user_id), user_name, join_date_iso)
-
-
-    should_respond = False
-    target_channel_ids = []
-
-    if isinstance(TARGET_CHANNEL_ID, (list, tuple)):
-        target_channel_ids = [str(cid) for cid in TARGET_CHANNEL_ID]
-    elif isinstance(TARGET_CHANNEL_ID, (str, int)):
-        target_channel_ids = [str(TARGET_CHANNEL_ID)]
-    elif isinstance(TARGET_CHANNEL_ID, dict):
-        target_channel_ids = [str(cid) for cid in TARGET_CHANNEL_ID.get(guild_id, [])]
-
-    if bot.user.mentioned_in(message) and not message.mention_everyone:
-        should_respond = True
-        logger.debug(f"Responding in guild {guild_id}: Bot mentioned by {user_name} ({user_id})")
-    elif message.reference and message.reference.resolved:
-        if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user:
-            should_respond = True
-            logger.debug(f"Responding in guild {guild_id}: User {user_id} replied to bot's message")
-    elif bot_name and bot_name in message.content:
-        should_respond = True
-        logger.debug(f"Responding in guild {guild_id}: Bot name '{bot_name}' mentioned by {user_id}")
-    elif str(channel.id) in target_channel_ids:
-        should_respond = True
-        logger.debug(f"Responding in guild {guild_id}: Message in target channel {channel.id} by {user_id}")
-
-    if should_respond:
-        if model is None:
-            logger.warning(f"AI model is not available. Cannot respond to message from {user_id} in guild {guild_id}.")
-            return
-
-        if Point_deduction_system > 0:
-            user_points = get_user_points(str(user_id), user_name, join_date_iso)
-            if user_points < Point_deduction_system:
-                try:
-                    await message.reply(f"抱歉，您的點數 ({user_points}) 不足本次互動所需的 {Point_deduction_system} 點。", mention_author=False)
-                    logger.info(f"User {user_name} ({user_id}) in guild {guild_id} has insufficient points ({user_points}/{Point_deduction_system})")
-                except discord.HTTPException as e: logger.error(f"Error replying about insufficient points to {user_id}: {e}")
-                return
-            else:
-                deduct_points(str(user_id), Point_deduction_system)
-
-        async with channel.typing():
+        step3 = time.time()
+        def _cleanup(path, error):
             try:
-                current_timestamp_utc8 = get_current_time_utc8()
-                initial_prompt = (
-                    f"{bot_name}是一位來自台灣的智能陪伴機器人..."
-                    f"現在的時間是:{current_timestamp_utc8} (UTC+8)。"
-                    f"請記住@{bot.user.id}是你的Discord ID。"
-                    f"當使用者 @{bot.user.display_name} 或提及其名稱 '{bot_name}' 時，就是在跟你說話。"
-                    f"請務必用 **繁體中文** 回答。"
-                    f"如果使用者想搜尋網路或瀏覽網頁，請建議他們使用 `/search` 或 `/aibrowse` 指令。"
-                )
-                initial_response = (
-                    f"好的，我知道了。我是{bot_name}，一位來自台灣，運用DBT技巧的智能陪伴機器人..."
-                )
+                os.remove(path)
+                logger.info(f"[{context}] Cleaned up {path}")
+            except OSError:
+                logger.warning(f"[{context}] Cleanup failed, file not found: {path}")
 
-                chat_history_raw = get_chat_history()
-                chat_history_processed = [
-                    {"role": "user", "parts": [{"text": initial_prompt}]},
-                    {"role": "model", "parts": [{"text": initial_response}]},
-                ]
+        voice_client.play(source, after=lambda err, path=tmp_path: _cleanup(path, err))
+        logger.info(f"[{context}] Step3 (play) took {time.time()-step3:.4f}s (started background)")
+        logger.info(f"[{context}] Total to playback start: {time.time()-total_start:.4f}s")
+        
+    @bot.event
+    async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+        """監聽成員語音狀態變化，用於播放加入/離開提示音"""
+        guild = member.guild
+        guild_id = guild.id
 
-                for row in chat_history_raw:
-                    db_user, db_content, db_timestamp = row
-                    if db_content:
-                        role = "user" if db_user != bot_name else "model"
-                        message_text = f"[{db_timestamp}] {db_user}: {db_content}" if role == 'user' else db_content
+        bot_voice_client = voice_clients.get(guild_id)
+        if member.id == bot.user.id or not bot_voice_client or not bot_voice_client.is_connected():
+            return
 
-                        chat_history_processed.append({"role": role, "parts": [{"text": message_text}]})
-                    else:
-                        logger.warning(f"Skipping empty message in chat history (guild {guild_id}) from user {db_user} at {db_timestamp}")
+        bot_channel = bot_voice_client.channel
 
-                if debug:
-                    logger.debug(f"--- Chat History for API (Guild: {guild_id}) ---")
-                    for entry in chat_history_processed[-5:]:
-                         logger.debug(f"Role: {entry['role']}, Parts: {str(entry['parts'])[:100]}...")
-                    logger.debug("--- End Chat History ---")
-                    logger.debug(f"Current User Message (Guild: {guild_id}): {message.content}")
+        if before.channel != bot_channel and after.channel == bot_channel:
+            user_name = member.display_name
+            logger.info(f"User '{user_name}' (ID: {member.id}) joined voice channel '{after.channel.name}' (ID: {after.channel.id}) where the bot is in guild {guild_id}.")
+            if len(bot_channel.members) > 1:
+                tts_message = f"{user_name} 加入了頻道"
+                await asyncio.sleep(0.5)
+                await play_tts(bot_voice_client, tts_message, context="User Join Notification")
+            else:
+                logger.info(f"Skipping join notification for {user_name} as they are the first user with the bot.")
 
-                chat = model.start_chat(history=chat_history_processed)
-                current_user_message_formatted = message.content
+        elif before.channel == bot_channel and after.channel != bot_channel:
+            user_name = member.display_name
+            logger.info(f"User '{user_name}' (ID: {member.id}) left voice channel '{before.channel.name}' (ID: {before.channel.id}) where the bot was in guild {guild_id}.")
+            if bot.user in before.channel.members and len(before.channel.members) > 0:
+                tts_message = f"{user_name} 離開了頻道"
+                await asyncio.sleep(0.5)
+                await play_tts(bot_voice_client, tts_message, context="User Leave Notification")
+            else:
+                logger.info(f"Skipping leave notification for {user_name} as they might be the last user or bot is no longer in the channel.")
 
-                api_response_text = ""
-                total_token_count = None
 
+    @bot.event
+    async def on_message(message: discord.Message):
+        if message.author == bot.user:
+            return
+
+        if not message.guild:
+            return
+
+        guild = message.guild
+        guild_id = guild.id
+        channel = message.channel
+        author = message.author
+        user_id = author.id
+        user_name = author.display_name
+
+        if WHITELISTED_SERVERS and guild_id not in WHITELISTED_SERVERS:
+            return
+
+        analytics_db_path = get_db_path(guild_id, 'analytics')
+        chat_db_path = get_db_path(guild_id, 'chat')
+        points_db_path = get_db_path(guild_id, 'points')
+
+
+        def update_user_message_count(user_id_str, user_name_str, join_date_iso):
+            conn = None
+            try:
+                conn = sqlite3.connect(analytics_db_path, timeout=10)
+                c = conn.cursor()
+                c.execute("CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0)")
+                c.execute("SELECT message_count FROM users WHERE user_id = ?", (user_id_str,))
+                result = c.fetchone()
+                if result:
+                    c.execute("UPDATE users SET message_count = message_count + 1, user_name = ? WHERE user_id = ?", (user_name_str, user_id_str))
+                else:
+                    join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
+                    c.execute("INSERT OR IGNORE INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1))
+                conn.commit()
+            except sqlite3.Error as e: logger.exception(f"DB error in update_user_message_count for user {user_id_str} in guild {guild_id}: {e}")
+            finally:
+                if conn: conn.close()
+
+        def update_token_in_db(total_token_count, userid_str, channelid_str):
+            if not total_token_count or not userid_str or not channelid_str:
+                logger.warning(f"Missing data for update_token_in_db (guild {guild_id}): tokens={total_token_count}, user={userid_str}, channel={channelid_str}")
+                return
+            conn = None
+            try:
+                conn = sqlite3.connect(analytics_db_path, timeout=10)
+                c = conn.cursor()
+                c.execute("""CREATE TABLE IF NOT EXISTS metadata (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            userid TEXT UNIQUE,
+                            total_token_count INTEGER,
+                            channelid TEXT)""")
+                c.execute("""INSERT INTO metadata (userid, total_token_count, channelid)
+                            VALUES (?, ?, ?)
+                            ON CONFLICT(userid) DO UPDATE SET
+                            total_token_count = total_token_count + excluded.total_token_count,
+                            channelid = excluded.channelid""",
+                        (userid_str, total_token_count, channelid_str))
+                conn.commit()
+                logger.debug(f"Updated token count for user {userid_str} in guild {guild_id}. Added: {total_token_count}")
+            except sqlite3.Error as e: logger.exception(f"DB error in update_token_in_db for user {userid_str} in guild {guild_id}: {e}")
+            finally:
+                if conn: conn.close()
+
+        def store_message(user_str, content_str, timestamp_str):
+            if not content_str: return
+            conn = None
+            try:
+                conn = sqlite3.connect(chat_db_path, timeout=10)
+                c = conn.cursor()
+                c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
+                c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
+                c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
+                conn.commit()
+                logger.debug(f"Stored message from '{user_str}' in chat history for guild {guild_id}")
+            except sqlite3.Error as e: logger.exception(f"DB error in store_message for guild {guild_id}: {e}")
+            finally:
+                if conn: conn.close()
+
+        def get_chat_history():
+            conn = None
+            history = []
+            try:
+                conn = sqlite3.connect(chat_db_path, timeout=10)
+                c = conn.cursor()
+                c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
+                c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
+                rows = c.fetchall()
+                history = rows
+                logger.debug(f"Retrieved {len(history)} messages from chat history for guild {guild_id}")
+            except sqlite3.Error as e: logger.exception(f"DB error in get_chat_history for guild {guild_id}: {e}")
+            finally:
+                if conn: conn.close()
+            return history
+
+        def get_user_points(user_id_str, user_name_str=None, join_date_iso=None):
+            conn = None
+            points = 0
+            try:
+                conn = sqlite3.connect(points_db_path, timeout=10)
+                cursor = conn.cursor()
+                cursor.execute(f"CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points})")
+                cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
+                result = cursor.fetchone()
+                if result:
+                    points = int(result[0])
+                elif default_points >= 0 and user_name_str:
+                    join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
+                    logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB (guild {guild_id}). Creating with {default_points} points.")
+                    cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
+                    cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
+                    if default_points > 0:
+                        cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
+                    conn.commit()
+                    points = default_points
+                else:
+                    logger.debug(f"User {user_id_str} not found in points DB (guild {guild_id}) and default points are negative. Returning 0 points.")
+
+            except sqlite3.Error as e: logger.exception(f"DB error in get_user_points for user {user_id_str} in guild {guild_id}: {e}")
+            except ValueError: logger.error(f"Value error converting points for user {user_id_str} in guild {guild_id}.")
+            finally:
+                if conn: conn.close()
+            return points
+
+        def deduct_points(user_id_str, points_to_deduct, reason="與機器人互動扣點"):
+            if points_to_deduct <= 0: return get_user_points(user_id_str)
+            conn = None
+            current_points = get_user_points(user_id_str)
+            try:
+                conn = sqlite3.connect(points_db_path, timeout=10)
+                cursor = conn.cursor()
+                cursor.execute(f"CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points})")
+                cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
+
+                cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
+                result = cursor.fetchone()
+                if not result:
+                    logger.warning(f"User {user_id_str} not found in points DB for deduction (guild {guild_id}). Cannot deduct points.")
+                    return 0
+
+                current_points_db = int(result[0])
+                if current_points_db < points_to_deduct:
+                    logger.warning(f"User {user_id_str} has insufficient points ({current_points_db}) to deduct {points_to_deduct} in guild {guild_id}.")
+                    return current_points_db
+
+                new_points = current_points_db - points_to_deduct
+                cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, user_id_str))
+                cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, -points_to_deduct, reason, get_current_time_utc8()))
+                conn.commit()
+                logger.info(f"Deducted {points_to_deduct} points from user {user_id_str} for '{reason}' in guild {guild_id}. New balance: {new_points}")
+                return new_points
+            except sqlite3.Error as e: logger.exception(f"DB error in deduct_points for user {user_id_str} in guild {guild_id}: {e}")
+            finally:
+                if conn: conn.close()
+            return current_points
+
+
+        conn_analytics_msg = None
+        try:
+            conn_analytics_msg = sqlite3.connect(analytics_db_path, timeout=10)
+            c_analytics_msg = conn_analytics_msg.cursor()
+            c_analytics_msg.execute("CREATE TABLE IF NOT EXISTS messages (message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)")
+            msg_time_utc = message.created_at.astimezone(timezone.utc).isoformat()
+            c_analytics_msg.execute("INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) VALUES (?, ?, ?, ?, ?)",
+                                    (str(user_id), user_name, str(channel.id), msg_time_utc, message.content))
+            conn_analytics_msg.commit()
+        except sqlite3.Error as e: logger.exception(f"DB error inserting message into analytics table for guild {guild_id}: {e}")
+        finally:
+            if conn_analytics_msg: conn_analytics_msg.close()
+
+        join_date_iso = None
+        if isinstance(author, discord.Member) and author.joined_at:
+            try:
+                join_date_iso = author.joined_at.astimezone(timezone.utc).isoformat()
+            except Exception as e: logger.error(f"Error converting join date for user {user_id} in guild {guild_id}: {e}")
+        update_user_message_count(str(user_id), user_name, join_date_iso)
+
+
+        should_respond = False
+        target_channel_ids = []
+
+        if isinstance(TARGET_CHANNEL_ID, (list, tuple)):
+            target_channel_ids = [str(cid) for cid in TARGET_CHANNEL_ID]
+        elif isinstance(TARGET_CHANNEL_ID, (str, int)):
+            target_channel_ids = [str(TARGET_CHANNEL_ID)]
+        elif isinstance(TARGET_CHANNEL_ID, dict):
+            target_channel_ids = [str(cid) for cid in TARGET_CHANNEL_ID.get(guild_id, [])]
+
+        if bot.user.mentioned_in(message) and not message.mention_everyone:
+            should_respond = True
+            logger.debug(f"Responding in guild {guild_id}: Bot mentioned by {user_name} ({user_id})")
+        elif message.reference and message.reference.resolved:
+            if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user:
+                should_respond = True
+                logger.debug(f"Responding in guild {guild_id}: User {user_id} replied to bot's message")
+        elif bot_name and bot_name in message.content:
+            should_respond = True
+            logger.debug(f"Responding in guild {guild_id}: Bot name '{bot_name}' mentioned by {user_id}")
+        elif str(channel.id) in target_channel_ids:
+            should_respond = True
+            logger.debug(f"Responding in guild {guild_id}: Message in target channel {channel.id} by {user_id}")
+
+        if should_respond:
+            if model is None:
+                logger.warning(f"AI model is not available. Cannot respond to message from {user_id} in guild {guild_id}.")
+                return
+
+            if Point_deduction_system > 0:
+                user_points = get_user_points(str(user_id), user_name, join_date_iso)
+                if user_points < Point_deduction_system:
+                    try:
+                        await message.reply(f"抱歉，您的點數 ({user_points}) 不足本次互動所需的 {Point_deduction_system} 點。", mention_author=False)
+                        logger.info(f"User {user_name} ({user_id}) in guild {guild_id} has insufficient points ({user_points}/{Point_deduction_system})")
+                    except discord.HTTPException as e: logger.error(f"Error replying about insufficient points to {user_id}: {e}")
+                    return
+                else:
+                    deduct_points(str(user_id), Point_deduction_system)
+
+            async with channel.typing():
                 try:
-                    response = await chat.send_message_async(
-                        current_user_message_formatted,
-                        stream=False,
-                        safety_settings={
-                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                        },
+                    current_timestamp_utc8 = get_current_time_utc8()
+                    initial_prompt = (
+                        f"{bot_name}是一位來自台灣的智能陪伴機器人..."
+                        f"現在的時間是:{current_timestamp_utc8} (UTC+8)。"
+                        f"請記住@{bot.user.id}是你的Discord ID。"
+                        f"當使用者 @{bot.user.display_name} 或提及其名稱 '{bot_name}' 時，就是在跟你說話。"
+                        f"請務必用 **繁體中文** 回答。"
+                        f"如果使用者想搜尋網路或瀏覽網頁，請建議他們使用 `/search` 或 `/aibrowse` 指令。"
+                    )
+                    initial_response = (
+                        f"好的，我知道了。我是{bot_name}，一位來自台灣，運用DBT技巧的智能陪伴機器人..."
                     )
 
-                    if response.prompt_feedback and response.prompt_feedback.block_reason:
-                        block_reason = response.prompt_feedback.block_reason
-                        logger.warning(f"Gemini API blocked prompt for user {user_id} in guild {guild_id}. Reason: {block_reason}")
-                        await message.reply("抱歉，您的訊息可能包含不當內容，我無法處理。", mention_author=False)
-                        return
+                    chat_history_raw = get_chat_history()
+                    chat_history_processed = [
+                        {"role": "user", "parts": [{"text": initial_prompt}]},
+                        {"role": "model", "parts": [{"text": initial_response}]},
+                    ]
 
-                    if not response.candidates:
-                        finish_reason = 'UNKNOWN'
-                        safety_ratings = 'N/A'
-                        try:
-                            if hasattr(response, 'candidates') and response.candidates:
-                                candidate = response.candidates[0]
-                                finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
-                                if hasattr(candidate, 'safety_ratings'):
-                                     safety_ratings = [(r.category, r.probability) for r in candidate.safety_ratings]
-                            else:
-                                finish_reason = getattr(response.prompt_feedback, 'block_reason', 'NO_CANDIDATES')
-                                if hasattr(response.prompt_feedback, 'safety_ratings'):
-                                     safety_ratings = [(r.category, r.probability) for r in response.prompt_feedback.safety_ratings]
+                    for row in chat_history_raw:
+                        db_user, db_content, db_timestamp = row
+                        if db_content:
+                            role = "user" if db_user != bot_name else "model"
+                            message_text = f"[{db_timestamp}] {db_user}: {db_content}" if role == 'user' else db_content
 
-                        except Exception as fr_err:
-                            logger.error(f"Error accessing finish_reason/safety_ratings: {fr_err}")
-
-                        logger.warning(f"No candidates returned from Gemini API for user {user_id} in guild {guild_id}. Finish Reason: {finish_reason}, Safety Ratings: {safety_ratings}")
-                        reply_message = "抱歉，我暫時無法產生回應"
-                        if finish_reason == 'SAFETY':
-                            reply_message += "，因為可能觸發了安全限制。"
-                        elif finish_reason == 'RECITATION':
-                             reply_message += "，因為回應可能包含受版權保護的內容。"
-                        elif finish_reason == 'MAX_TOKENS':
-                             reply_message = "呃，我好像說得太多了，無法產生完整的的回應。"
+                            chat_history_processed.append({"role": role, "parts": [{"text": message_text}]})
                         else:
-                            reply_message += "，請稍後再試。"
-                        await message.reply(reply_message, mention_author=False)
-                        return
+                            logger.warning(f"Skipping empty message in chat history (guild {guild_id}) from user {db_user} at {db_timestamp}")
 
-                    api_response_text = response.text.strip()
-                    logger.info(f"Gemini API response received for user {user_id} in guild {guild_id}. Length: {len(api_response_text)}")
-                    if debug: logger.debug(f"Gemini Response Text (Guild {guild_id}): {api_response_text[:200]}...")
+                    if debug:
+                        logger.debug(f"--- Chat History for API (Guild: {guild_id}) ---")
+                        for entry in chat_history_processed[-5:]:
+                            logger.debug(f"Role: {entry['role']}, Parts: {str(entry['parts'])[:100]}...")
+                        logger.debug("--- End Chat History ---")
+                        logger.debug(f"Current User Message (Guild: {guild_id}): {message.content}")
+
+                    chat = model.start_chat(history=chat_history_processed)
+                    current_user_message_formatted = message.content
+
+                    api_response_text = ""
+                    total_token_count = None
 
                     try:
-                        usage_metadata = getattr(response, 'usage_metadata', None)
-                        if usage_metadata:
-                             prompt_token_count = getattr(usage_metadata, 'prompt_token_count', 0)
-                             candidates_token_count = getattr(usage_metadata, 'candidates_token_count', 0)
-                             total_token_count = getattr(usage_metadata, 'total_token_count', None)
-                             if total_token_count is None:
-                                 total_token_count = prompt_token_count + candidates_token_count
-                             logger.info(f"Token usage (Guild {guild_id}): Prompt={prompt_token_count}, Candidates={candidates_token_count}, Total={total_token_count}")
-                        else:
-                            if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
-                                total_token_count = response.candidates[0].token_count
-                                logger.info(f"Total token count from candidate (fallback, Guild {guild_id}): {total_token_count}")
-                            else:
-                                logger.warning(f"Could not find token count in API response (Guild {guild_id}).")
+                        response = await chat.send_message_async(
+                            current_user_message_formatted,
+                            stream=False,
+                            safety_settings={
+                                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+                            },
+                        )
 
-                        if total_token_count is not None and total_token_count > 0:
-                            update_token_in_db(total_token_count, str(user_id), str(channel.id))
-                        else:
-                             logger.warning(f"Token count is {total_token_count}, not updating DB for user {user_id} in guild {guild_id}.")
+                        if response.prompt_feedback and response.prompt_feedback.block_reason:
+                            block_reason = response.prompt_feedback.block_reason
+                            logger.warning(f"Gemini API blocked prompt for user {user_id} in guild {guild_id}. Reason: {block_reason}")
+                            await message.reply("抱歉，您的訊息可能包含不當內容，我無法處理。", mention_author=False)
+                            return
 
-                    except AttributeError as attr_err:
-                        logger.error(f"Attribute error processing token count (Guild {guild_id}): {attr_err}. Response structure might have changed.")
-                    except Exception as token_error:
-                        logger.error(f"Error processing token count (Guild {guild_id}): {token_error}")
-
-                    store_message(user_name, message.content, current_timestamp_utc8)
-                    if api_response_text:
-                        store_message(bot_name, api_response_text, get_current_time_utc8())
-
-                    if api_response_text:
-                        if len(api_response_text) > 2000:
-                            logger.warning(f"API reply exceeds 2000 characters ({len(api_response_text)}) for guild {guild_id}. Splitting.")
-                            parts = []
-                            current_part = ""
-                            lines = api_response_text.split('\n')
-                            for line in lines:
-                                if len(current_part) + len(line) + 1 > 1990:
-                                    if current_part:
-                                        parts.append(current_part)
-                                    if len(line) > 1990:
-                                         for i in range(0, len(line), 1990):
-                                             parts.append(line[i:i+1990])
-                                         current_part = ""
-                                    else:
-                                         current_part = line
+                        if not response.candidates:
+                            finish_reason = 'UNKNOWN'
+                            safety_ratings = 'N/A'
+                            try:
+                                if hasattr(response, 'candidates') and response.candidates:
+                                    candidate = response.candidates[0]
+                                    finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+                                    if hasattr(candidate, 'safety_ratings'):
+                                        safety_ratings = [(r.category, r.probability) for r in candidate.safety_ratings]
                                 else:
-                                     if current_part:
-                                         current_part += "\n" + line
-                                     else:
-                                         current_part = line
-                            if current_part:
-                                parts.append(current_part)
+                                    finish_reason = getattr(response.prompt_feedback, 'block_reason', 'NO_CANDIDATES')
+                                    if hasattr(response.prompt_feedback, 'safety_ratings'):
+                                        safety_ratings = [(r.category, r.probability) for r in response.prompt_feedback.safety_ratings]
 
-                            first_part = True
-                            for i, part in enumerate(parts):
-                                part_to_send = part.strip()
-                                if not part_to_send: continue
-                                try:
-                                    if first_part:
-                                        await message.reply(part_to_send, mention_author=False)
-                                        first_part = False
-                                    else:
-                                        await channel.send(part_to_send)
-                                    logger.info(f"Sent part {i+1}/{len(parts)} of long reply to guild {guild_id}.")
-                                    await asyncio.sleep(0.5)
-                                except discord.HTTPException as send_e:
-                                     logger.error(f"Error sending part {i+1} of long reply in guild {guild_id}: {send_e}")
-                                     break
-                        else:
-                            await message.reply(api_response_text, mention_author=False)
-                            logger.info(f"Sent reply to user {user_id} in guild {guild_id}.")
+                            except Exception as fr_err:
+                                logger.error(f"Error accessing finish_reason/safety_ratings: {fr_err}")
 
-                        guild_voice_client = voice_clients.get(guild_id)
-                        if guild_voice_client and guild_voice_client.is_connected():
-                            tts_text_cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text)
-                            tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
-                            tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
-                            tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
-                            tts_text_cleaned = re.sub(r'http[s]?://\S+', '網址', tts_text_cleaned)
-                            tts_text_cleaned = re.sub(r'\s+', ' ', tts_text_cleaned).strip()
-
-                            if tts_text_cleaned:
-                                logger.info(f"Queueing TTS playback for AI reply in guild {guild_id}.")
-                                await play_tts(guild_voice_client, tts_text_cleaned, context="AI Reply")
+                            logger.warning(f"No candidates returned from Gemini API for user {user_id} in guild {guild_id}. Finish Reason: {finish_reason}, Safety Ratings: {safety_ratings}")
+                            reply_message = "抱歉，我暫時無法產生回應"
+                            if finish_reason == 'SAFETY':
+                                reply_message += "，因為可能觸發了安全限制。"
+                            elif finish_reason == 'RECITATION':
+                                reply_message += "，因為回應可能包含受版權保護的內容。"
+                            elif finish_reason == 'MAX_TOKENS':
+                                reply_message = "呃，我好像說得太多了，無法產生完整的的回應。"
                             else:
-                                logger.info(f"Skipping TTS for AI reply in guild {guild_id} after cleaning resulted in empty text.")
+                                reply_message += "，請稍後再試。"
+                            await message.reply(reply_message, mention_author=False)
+                            return
+
+                        api_response_text = response.text.strip()
+                        logger.info(f"Gemini API response received for user {user_id} in guild {guild_id}. Length: {len(api_response_text)}")
+                        if debug: logger.debug(f"Gemini Response Text (Guild {guild_id}): {api_response_text[:200]}...")
+
+                        try:
+                            usage_metadata = getattr(response, 'usage_metadata', None)
+                            if usage_metadata:
+                                prompt_token_count = getattr(usage_metadata, 'prompt_token_count', 0)
+                                candidates_token_count = getattr(usage_metadata, 'candidates_token_count', 0)
+                                total_token_count = getattr(usage_metadata, 'total_token_count', None)
+                                if total_token_count is None:
+                                    total_token_count = prompt_token_count + candidates_token_count
+                                logger.info(f"Token usage (Guild {guild_id}): Prompt={prompt_token_count}, Candidates={candidates_token_count}, Total={total_token_count}")
+                            else:
+                                if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
+                                    total_token_count = response.candidates[0].token_count
+                                    logger.info(f"Total token count from candidate (fallback, Guild {guild_id}): {total_token_count}")
+                                else:
+                                    logger.warning(f"Could not find token count in API response (Guild {guild_id}).")
+
+                            if total_token_count is not None and total_token_count > 0:
+                                update_token_in_db(total_token_count, str(user_id), str(channel.id))
+                            else:
+                                logger.warning(f"Token count is {total_token_count}, not updating DB for user {user_id} in guild {guild_id}.")
+
+                        except AttributeError as attr_err:
+                            logger.error(f"Attribute error processing token count (Guild {guild_id}): {attr_err}. Response structure might have changed.")
+                        except Exception as token_error:
+                            logger.error(f"Error processing token count (Guild {guild_id}): {token_error}")
+
+                        store_message(user_name, message.content, current_timestamp_utc8)
+                        if api_response_text:
+                            store_message(bot_name, api_response_text, get_current_time_utc8())
+
+                        if api_response_text:
+                            if len(api_response_text) > 2000:
+                                logger.warning(f"API reply exceeds 2000 characters ({len(api_response_text)}) for guild {guild_id}. Splitting.")
+                                parts = []
+                                current_part = ""
+                                lines = api_response_text.split('\n')
+                                for line in lines:
+                                    if len(current_part) + len(line) + 1 > 1990:
+                                        if current_part:
+                                            parts.append(current_part)
+                                        if len(line) > 1990:
+                                            for i in range(0, len(line), 1990):
+                                                parts.append(line[i:i+1990])
+                                            current_part = ""
+                                        else:
+                                            current_part = line
+                                    else:
+                                        if current_part:
+                                            current_part += "\n" + line
+                                        else:
+                                            current_part = line
+                                if current_part:
+                                    parts.append(current_part)
+
+                                first_part = True
+                                for i, part in enumerate(parts):
+                                    part_to_send = part.strip()
+                                    if not part_to_send: continue
+                                    try:
+                                        if first_part:
+                                            await message.reply(part_to_send, mention_author=False)
+                                            first_part = False
+                                        else:
+                                            await channel.send(part_to_send)
+                                        logger.info(f"Sent part {i+1}/{len(parts)} of long reply to guild {guild_id}.")
+                                        await asyncio.sleep(0.5)
+                                    except discord.HTTPException as send_e:
+                                        logger.error(f"Error sending part {i+1} of long reply in guild {guild_id}: {send_e}")
+                                        break
+                            else:
+                                await message.reply(api_response_text, mention_author=False)
+                                logger.info(f"Sent reply to user {user_id} in guild {guild_id}.")
+
+                            guild_voice_client = voice_clients.get(guild_id)
+                            if guild_voice_client and guild_voice_client.is_connected():
+                                tts_text_cleaned = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', api_response_text)
+                                tts_text_cleaned = re.sub(r'[*_`~]', '', tts_text_cleaned)
+                                tts_text_cleaned = re.sub(r'<@!?\d+>', '', tts_text_cleaned)
+                                tts_text_cleaned = re.sub(r'<#\d+>', '', tts_text_cleaned)
+                                tts_text_cleaned = re.sub(r'http[s]?://\S+', '網址', tts_text_cleaned)
+                                tts_text_cleaned = re.sub(r'\s+', ' ', tts_text_cleaned).strip()
+
+                                if tts_text_cleaned:
+                                    logger.info(f"Queueing TTS playback for AI reply in guild {guild_id}.")
+                                    await play_tts(guild_voice_client, tts_text_cleaned, context="AI Reply")
+                                else:
+                                    logger.info(f"Skipping TTS for AI reply in guild {guild_id} after cleaning resulted in empty text.")
+                        else:
+                            logger.warning(f"Gemini API returned empty text response for user {user_id} in guild {guild_id}.")
+                            await message.reply("嗯...我好像不知道該說什麼。", mention_author=False)
+
+                    except genai.types.BlockedPromptException as e:
+                        logger.warning(f"Gemini API blocked prompt (send_message) for user {user_id} in guild {guild_id}: {e}")
+                        await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
+                    except genai.types.StopCandidateException as e:
+                        logger.warning(f"Gemini API stopped candidate generation (send_message) for user {user_id} in guild {guild_id}: {e}")
+                        await message.reply("抱歉，產生回應時似乎被中斷了，請稍後再試。", mention_author=False)
+                    except Exception as api_call_e:
+                        logger.exception(f"Error during Gemini API interaction for user {user_id} in guild {guild_id}: {api_call_e}")
+                        await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
+
+                except discord.errors.HTTPException as e:
+                    if e.status == 403:
+                        logger.error(f"Permission error (403) in channel {channel.id} (guild {guild_id}) or for user {user_id}: {e.text}")
+                        try:
+                            await author.send(f"我在頻道 <#{channel.id}> 中似乎缺少回覆訊息的權限，請檢查設定。")
+                        except discord.errors.Forbidden:
+                            logger.error(f"Failed to DM user {user_id} about permission error in guild {guild_id}.")
                     else:
-                        logger.warning(f"Gemini API returned empty text response for user {user_id} in guild {guild_id}.")
-                        await message.reply("嗯...我好像不知道該說什麼。", mention_author=False)
-
-                except genai.types.BlockedPromptException as e:
-                    logger.warning(f"Gemini API blocked prompt (send_message) for user {user_id} in guild {guild_id}: {e}")
-                    await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
-                except genai.types.StopCandidateException as e:
-                    logger.warning(f"Gemini API stopped candidate generation (send_message) for user {user_id} in guild {guild_id}: {e}")
-                    await message.reply("抱歉，產生回應時似乎被中斷了，請稍後再試。", mention_author=False)
-                except Exception as api_call_e:
-                    logger.exception(f"Error during Gemini API interaction for user {user_id} in guild {guild_id}: {api_call_e}")
-                    await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
-
-            except discord.errors.HTTPException as e:
-                if e.status == 403:
-                    logger.error(f"Permission error (403) in channel {channel.id} (guild {guild_id}) or for user {user_id}: {e.text}")
+                        logger.exception(f"HTTPException occurred while processing message for user {user_id} in guild {guild_id}: {e}")
+                except Exception as e:
+                    logger.exception(f"An unexpected error occurred in on_message processing for user {user_id} in guild {guild_id}: {e}")
                     try:
-                        await author.send(f"我在頻道 <#{channel.id}> 中似乎缺少回覆訊息的權限，請檢查設定。")
-                    except discord.errors.Forbidden:
-                        logger.error(f"Failed to DM user {user_id} about permission error in guild {guild_id}.")
-                else:
-                    logger.exception(f"HTTPException occurred while processing message for user {user_id} in guild {guild_id}: {e}")
-            except Exception as e:
-                logger.exception(f"An unexpected error occurred in on_message processing for user {user_id} in guild {guild_id}: {e}")
-                try:
-                    await message.reply("處理您的訊息時發生未預期的錯誤。", mention_author=False)
-                except Exception as reply_err:
-                    logger.error(f"Failed to send error reply message in guild {guild_id}: {reply_err}")
+                        await message.reply("處理您的訊息時發生未預期的錯誤。", mention_author=False)
+                    except Exception as reply_err:
+                        logger.error(f"Failed to send error reply message in guild {guild_id}: {reply_err}")
 
 
 def bot_run():
