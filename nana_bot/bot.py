@@ -719,8 +719,44 @@ async def leave(interaction: discord.Interaction):
             await interaction.response.send_message("我目前不在任何語音頻道中。", ephemeral=True)
 
 
-async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "Unknown"):
-    """使用 edge-tts 生成語音並在語音頻道中播放，同時記錄時間"""
+async def play_tts(voice_client, text: str, context: str = "TTS"):
+    total_start = time.time()
+    logger.info(f"[{context}] Starting TTS playback for text: '{text}'")
+
+    step1_start = time.time()
+    communicate = edge_tts.Communicate(text, DEFAULT_VOICE)
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp_path = tmp.name
+    await communicate.save(tmp_path)
+    step1_end = time.time()
+    logger.info(f"[{context}] Step 1 (Generate & Save) took: {step1_end - step1_start:.4f} seconds. File: {tmp_path}")
+
+    step2_start = time.time()
+    source = FFmpegPCMAudio(
+        tmp_path,
+        before_options="",
+        options=None
+    )
+    step2_end = time.time()
+    logger.info(f"[{context}] Step 2 (Create Source) took: {step2_end - step2_start:.4f} seconds.")
+
+    logger.info(f"[{context}] Time between Step 1 and 2: {step2_start - step1_end:.4f} seconds.")
+
+    step3_start = time.time()
+    def _cleanup(error):
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    voice_client.play(source, after=lambda e: _cleanup(e))
+    step3_end = time.time()
+    logger.info(f"[{context}] Step 3 (Initiate Playback) took: {step3_end - step3_start:.4f} seconds. Playback started in background.")
+
+    logger.info(f"[{context}] Time between Step 2 and 3: {step3_start - step2_end:.4f} seconds.")
+
+    total_elapsed = time.time() - total_start
+    logger.info(f"[{context}] Total time (Start to Playback Initiated): {total_elapsed:.4f} seconds.")
     if not voice_client or not voice_client.is_connected():
         logger.warning(f"play_tts called but voice_client is invalid or not connected (Context: {context}).")
         return
