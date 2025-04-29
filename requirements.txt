@@ -10,6 +10,7 @@ python-dotenv
 gtts
 pyttsx3
 google-cloud-texttospeech
+google-cloud-speech
 torchaudio
 edge_tts
 SpeechRecognition
