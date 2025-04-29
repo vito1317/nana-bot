@@ -808,16 +808,19 @@ async def join(interaction: discord.Interaction):
     if current_vc and current_vc.is_connected():
         if current_vc.channel == channel:
             if guild_id not in listening_guilds:
-                 logger.info(f"[STT] Bot already in channel {channel.id}, starting listening...")
-                 try:
-                     await interaction.response.defer(ephemeral=True, thinking=True)
-                     sink = sinks.WaveSink() # <--- 使用 sinks.WaveSink
-                     current_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, current_vc)))
-                     listening_guilds[guild_id] = current_vc
-                     await interaction.followup.send(f"我已經在 {channel.mention} 了，現在開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。", ephemeral=True)
-                 except Exception as e:
-                     logger.error(f"[STT] Error starting listening on existing connection: {e}")
-                     await interaction.followup.send("嘗試開始聆聽時發生錯誤。", ephemeral=True)
+                logger.info(f"[STT] Bot already in channel {channel.id}, starting listening...")
+                try:
+                    await interaction.response.defer(ephemeral=True, thinking=True)
+                    os.makedirs("recordings", exist_ok=True)
+                    from discord.ext.voice_recv import sinks
+                    sink = sinks.WaveSink(destination="recordings")
+                    voice_client.listen(sink, after=lambda err, s=sink: asyncio.create_task(after_listening(s, interaction.channel, voice_client)))
+                    current_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, current_vc)))
+                    listening_guilds[guild_id] = current_vc
+                    await interaction.followup.send(f"我已經在 {channel.mention} 了，現在開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。", ephemeral=True)
+                except Exception as e:
+                    logger.error(f"[STT] Error starting listening on existing connection: {e}")
+                    await interaction.followup.send("嘗試開始聆聽時發生錯誤。", ephemeral=True)
             else:
                  await interaction.response.send_message(f"我已經在 {channel.mention} 並且正在聆聽了。", ephemeral=True)
             return
