@@ -814,7 +814,7 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
         return
     text = results[-1].strip()
     logger.info(f"[STT_Extras] Recognized via extras: {text!r}")
-    logger.info(f"[STT] 辨識結果：{text!r}")       # 會在 console 印出
+    logger.info(f"[STT] 辨識結果：{text!r}")
     await channel.send(f"🔊 我聽到：「{text}」")
     if STT_ACTIVATION_WORD.lower() not in text.lower():
         return
@@ -889,7 +889,7 @@ async def join_sr(interaction: discord.Interaction):
         cls=voice_recv.VoiceRecvClient, timeout=60, reconnect=True, self_deaf=False
     )
     def text_cb(user_id, texts):
-        # texts: list[str]，包含分段後的一句話
+        texts: list[str]
         asyncio.run_coroutine_threadsafe(
             handle_result(texts, interaction.channel, vc),
             bot.loop
