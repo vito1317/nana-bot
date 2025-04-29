@@ -6,7 +6,7 @@ import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
 #import discord.sinks as sinks
 from discord.ext.voice_recv import sinks
-from discord.ext import commands, tasks
+from discord.ext import commands, tasks, voice_recv
 from typing import Optional, Dict
 import sqlite3
 import logging
@@ -863,7 +863,13 @@ async def join(interaction: discord.Interaction):
     logger.info(f"嘗試連接到語音頻道 {channel.id} (伺服器 {guild_id})")
     try:
         await interaction.response.defer(ephemeral=False, thinking=True)
-        voice_client = await channel.connect(timeout=60.0, reconnect=True, self_deaf=False)
+        voice_client = await channel.connect(
+            cls=voice_recv.VoiceRecvClient,
+            timeout=60.0,
+            reconnect=True,
+            self_deaf=False
+        )
+        
         voice_clients[guild_id] = voice_client
 
         logger.info(f"[STT] Starting listening in channel {channel.name}...")
