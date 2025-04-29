@@ -838,7 +838,7 @@ async def join(interaction: discord.Interaction):
                 vc = guild.voice_client
 
                 logger.info(f"[STT] Starting listening in new channel {channel.name}...")
-                sink = sinks.WaveSink() # <--- 使用 sinks.WaveSink
+                sink = sinks.WaveSink(destination="recordings")
                 vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, vc)))
                 listening_guilds[guild_id] = vc
 
