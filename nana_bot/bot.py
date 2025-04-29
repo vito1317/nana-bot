@@ -53,7 +53,7 @@ from discord import FFmpegPCMAudio
 
 
 
-DEFAULT_VOICE = "zh-TW-YunRuNeural"
+DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
 
 logging.basicConfig(level=logging.INFO if not debug else logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
