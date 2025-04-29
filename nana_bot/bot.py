@@ -898,10 +898,12 @@ async def join(interaction: discord.Interaction):
     sink = SpeechRecognitionSink(
         process_cb=None,
         default_recognizer="whisper",
-        text_cb=lambda user_id, results: asyncio.create_task(
-            handle_result(results, interaction.channel, vc)
-        )
-    )  # :contentReference[oaicite:1]{index=1}
+        text_cb=lambda user_id, results: 
+            asyncio.run_coroutine_threadsafe(
+                handle_result(results, interaction.channel, vc),
+                bot.loop
+            )
+    )
 
     vc.listen(sink)
     listening_guilds[interaction.guild.id] = vc
