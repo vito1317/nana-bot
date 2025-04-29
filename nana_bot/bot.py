@@ -79,8 +79,7 @@ def make_wave_sink(guild_id: int) -> sinks.WaveSink:
     # 確保 recordings 資料夾存在
     os.makedirs("recordings", exist_ok=True)
     # 用 guild id 和 timestamp 產生唯一檔名
-    filename = f"{guild_id}_{int(time.time())}.wav"
-    path = os.path.join("recordings", filename)
+    path = f"recordings/{guild_id}_{int(time.time())}.wav"  # ← 確保是檔案
     return sinks.WaveSink(destination=path)
 async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
     total_start = time.time()
@@ -671,6 +670,7 @@ async def on_member_remove(member):
         logger.exception(f"Unexpected error during on_member_remove for {member.name} (ID: {member.id}) in guild {guild.id}: {e}")
 
 async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc: discord.VoiceClient): # <--- 使用 sinks.WaveSink
+    logger.info(f"[STT] after_listening 開始執行，sink.audio_data 長度 = {len(sink.audio_data)}")
     loop = asyncio.get_running_loop()
     guild_id = vc.guild.id if vc.guild else None
     logger.info(f"[STT] after_listening called for guild {guild_id}")
@@ -689,6 +689,7 @@ async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc
 
     tasks = []
     for user_id, audio in sink.audio_data.items():
+        logger.info(f"[STT] 準備處理 {user_id} 的音訊，AudioData = {audio}")
         member = channel.guild.get_member(user_id)
         user_name = member.display_name if member else f"User ID {user_id}"
         logger.info(f"[STT] Processing audio for {user_name} (ID: {user_id})")
@@ -819,7 +820,13 @@ async def join(interaction: discord.Interaction):
                     await interaction.response.defer(ephemeral=True, thinking=True)
                     #from discord.ext.voice_recv import sinks
                     sink = sinks.WaveSink(destination="recordings")
-                    voice_client.listen(sink, after=lambda err, s=sink: asyncio.create_task(after_listening(s, interaction.channel, voice_client)))
+                    voice_client.listen(
+                        sink,
+                        after=lambda err, sink=sink: asyncio.run_coroutine_threadsafe(
+                            after_listening(sink, interaction.channel, voice_client),
+                            bot.loop
+                        )
+                    )
                     current_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, current_vc)))
                     listening_guilds[guild_id] = current_vc
                     await interaction.followup.send(f"我已經在 {channel.mention} 了，現在開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。", ephemeral=True)
