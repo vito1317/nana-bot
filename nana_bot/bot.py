@@ -87,11 +87,9 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         logger.info(f"[{context}] 步驟 1 (生成音檔) 耗時 {time.time()-step1:.4f}s -> {tmp_path}")
 
         step2 = time.time()
-        # --- 修正 FFmpeg 選項 ---
-        # 移除不適用於本地檔案的 -reconnect 選項
         ffmpeg_options = {
-            'before_options': '', # 清空 before_options
-            'options': '-vn' # 保留 -vn (不處理視頻)
+            'before_options': '',
+            'options': '-vn'
         }
         source = await loop.run_in_executor(
             None,
@@ -101,19 +99,17 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
 
         if not voice_client.is_connected():
              logger.warning(f"[{context}] 創建音源後，語音客戶端已斷開連接。")
-             # 清理工作會在 finally 中處理
              return
 
         if voice_client.is_playing():
             logger.info(f"[{context}] 停止當前播放以播放新的 TTS。")
             voice_client.stop()
-            await asyncio.sleep(0.1) # 短暫等待確保停止
+            await asyncio.sleep(0.1)
 
         step3 = time.time()
         def _cleanup(error, path_to_clean):
             log_prefix = f"[{context}][Cleanup]"
             if error:
-                # 記錄 FFmpeg 的詳細錯誤輸出 (如果 discord.py 提供的話)
                 logger.error(f"{log_prefix} 播放器錯誤: {error}")
             else:
                  logger.info(f"{log_prefix} TTS 播放完成。")
@@ -133,27 +129,21 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
     except edge_tts.exceptions.UnexpectedStatusCode as e:
          logger.error(f"[{context}] Edge TTS 失敗: 非預期狀態碼 {e.status_code}。 文字: '{text[:50]}...'")
     except FileNotFoundError:
-        # 這個錯誤通常是 FFmpeg 執行檔本身找不到
         logger.error(f"[{context}] FFmpeg 錯誤: 找不到 FFmpeg 執行檔。請確保 FFmpeg 已安裝並在系統 PATH 中。")
     except discord.errors.ClientException as e:
-        # 可能的錯誤: "Already playing audio." 或其他客戶端問題
         logger.error(f"[{context}] Discord 客戶端錯誤 (播放時): {e}")
     except Exception as e:
-        # 捕捉其他所有未預期的錯誤
         logger.exception(f"[{context}] play_tts 中發生非預期錯誤。 文字: '{text[:50]}...'")
 
     finally:
-        # 確保在播放器未運行且檔案存在時清理 (作為最後防線)
         if tmp_path and os.path.exists(tmp_path):
-            # 檢查播放器是否真的停止了並且沒有使用該檔案
              is_playing = False
              try:
                  if voice_client and voice_client.is_playing():
-                      # 檢查 source 是否是同一個檔案 (簡易判斷)
                       if hasattr(voice_client._player, 'source') and hasattr(voice_client._player.source, 'original'):
                            if isinstance(voice_client._player.source.original, FFmpegPCMAudio) and voice_client._player.source.original.executable == tmp_path:
                                 is_playing = True
-             except Exception: # 忽略檢查錯誤
+             except Exception:
                  pass
 
              if not is_playing:
