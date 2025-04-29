@@ -833,7 +833,22 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
         f"如需搜尋或瀏覽網頁，我建議 `/search` 或 `/aibrowse`；"
         f"現在時間：{timestamp}。"
     )
-
+    chat_db_path = get_db_path(channel.guild.id, 'chat')
+    def get_chat_history():
+        conn = None
+        history = []
+        try:
+            conn = sqlite3.connect(chat_db_path, timeout=10)
+            c = conn.cursor()
+            c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
+            c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
+            rows = c.fetchall()
+            history = rows
+            logger.debug(f"Retrieved {len(history)} messages from chat history for guild {channel.guild_id}")
+        except sqlite3.Error as e: logger.exception(f"DB error in get_chat_history for guild {channel.guild_id}: {e}")
+        finally:
+            if conn: conn.close()
+        return history
     chat_history_raw = get_chat_history()
     history = [
         {"role": "user",  "parts": [{"text": initial_prompt}]},
