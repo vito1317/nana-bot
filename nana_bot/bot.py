@@ -76,11 +76,11 @@ recognizer = sr.Recognizer()
 
 listening_guilds: Dict[int, discord.VoiceClient] = {}
 def make_wave_sink(guild_id: int) -> sinks.WaveSink:
-    # 確保 recordings 資料夾存在
     os.makedirs("recordings", exist_ok=True)
-    # 用 guild id 和 timestamp 產生唯一檔名
-    path = f"recordings/{guild_id}_{int(time.time())}.wav"  # ← 確保是檔案
+    path = os.path.abspath(f"recordings/{guild_id}_{int(time.time())}.wav")
+    logger.info(f"[STT] 這次的 wav 檔案路徑：{path}")
     return sinks.WaveSink(destination=path)
+
 async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
     total_start = time.time()
     if not voice_client or not voice_client.is_connected():
@@ -822,11 +822,13 @@ async def join(interaction: discord.Interaction):
                     sink = sinks.WaveSink(destination="recordings")
                     voice_client.listen(
                         sink,
-                        after=lambda err, sink=sink: asyncio.run_coroutine_threadsafe(
-                            after_listening(sink, interaction.channel, voice_client),
-                            bot.loop
-                        )
+                        after=lambda err, sink=sink: 
+                            asyncio.run_coroutine_threadsafe(
+                                after_listening(sink, interaction.channel, voice_client),
+                                bot.loop
+                            )
                     )
+
                     current_vc.listen(sink, after=lambda error, sink=sink: asyncio.create_task(after_listening(sink, interaction.channel, current_vc)))
                     listening_guilds[guild_id] = current_vc
                     await interaction.followup.send(f"我已經在 {channel.mention} 了，現在開始聆聽！說「{STT_ACTIVATION_WORD}」加上你的問題試試看。", ephemeral=True)
