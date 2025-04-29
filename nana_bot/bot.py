@@ -807,14 +807,15 @@ def process_recognized_text(vc: discord.VoiceClient, user_id: int, user_name: st
         logger.exception(f"[STT_Worker] Unexpected error during speech recognition for {user_name}: {stt_err}")
 buffers = defaultdict(bytearray)
 sample_width = 2
-silence_threshold = 500
+silence_threshold = 5000
 os.makedirs("recordings", exist_ok=True)
 async def handle_result(results: list, channel: discord.TextChannel, vc: discord.VoiceClient):
     if not results:
         return
     text = results[-1].strip()
     logger.info(f"[STT_Extras] Recognized via extras: {text!r}")
-
+    logger.info(f"[STT] 辨識結果：{text!r}")       # 會在 console 印出
+    await channel.send(f"🔊 我聽到：「{text}」")
     if STT_ACTIVATION_WORD.lower() not in text.lower():
         return
     query = text.lower().split(STT_ACTIVATION_WORD.lower(), 1)[1].strip()
@@ -881,42 +882,21 @@ async def handle_result(results: list, channel: discord.TextChannel, vc: discord
 
         await play_tts(vc, reply, context="STT AI Response")
         await channel.send(reply)
-@bot.tree.command(name='join', description="加入語音並開始聆聽")
-async def join(interaction: discord.Interaction):
+@bot.tree.command(name='join', description="加入並使用 SpeechRecognitionSink")
+async def join_sr(interaction: discord.Interaction):
     user = interaction.user
-    if not user.voice or not user.voice.channel:
-        await interaction.response.send_message("請先加入語音頻道！", ephemeral=True)
-        return
-
-    channel = interaction.channel
     vc = await user.voice.channel.connect(
-        cls=voice_recv.VoiceRecvClient,
-        timeout=60, reconnect=True, self_deaf=False
+        cls=voice_recv.VoiceRecvClient, timeout=60, reconnect=True, self_deaf=False
     )
-    listening_guilds[interaction.guild.id] = vc
-
-    def process_cb(user_id, opus_data, pcm_data):
-        buffers[user_id] += pcm_data
-        rms = audioop.rms(pcm_data, sample_width)
-        if rms < silence_threshold:
-            return
-        audio = bytes(buffers[user_id])
-        buffers[user_id].clear()
+    def text_cb(user_id, texts):
+        # texts: list[str]，包含分段後的一句話
         asyncio.run_coroutine_threadsafe(
-            handle_result([audio], channel, vc),
+            handle_result(texts, interaction.channel, vc),
             bot.loop
         )
-
-    def process_cb_callback(sink):
-        for user_id, audio in sink.audio_data.items():
-            pcm = audio.get_raw_data()
-            process_cb(user_id, None, pcm)
-
-    sink = make_wave_sink(interaction.guild.id)
-    vc.listen(sink, after=lambda err, s=sink: process_cb_callback(s))
-
-    await interaction.response.send_message("已加入語音並開始聆聽！", ephemeral=True)
-@bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
+    sink = SpeechRecognitionSink(text_cb=text_cb)
+    vc.listen(sink)
+    await interaction.response.send_message("已加入並啟動語音辨識 (SpeechRecognitionSink)", ephemeral=True)@bot.tree.command(name='leave', description="讓機器人離開目前的語音頻道並停止監聽")
 @app_commands.guild_only()
 async def leave(interaction: discord.Interaction):
     guild = interaction.guild

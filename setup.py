@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.9.9.2",
+    version="5.8.9.9.3",
     license="MIT",
     author="Vito1317",
     author_email="service@vito1317.com",
