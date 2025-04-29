@@ -27,6 +27,7 @@
 ## 安裝
 
 ```bash
+pip install git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git@main
 pip install nana-bot
 ```
 ## 設定(可跳過，直接使用設定檔>>請看下面或是使用直接設定方法)
