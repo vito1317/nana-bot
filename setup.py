@@ -37,7 +37,7 @@ setuptools.setup(
         "edge_tts",
         "SpeechRecognition",
         "py-cord",
-        "discord-ext-voice-recv @ git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git@main",
+        #"discord-ext-voice-recv @ git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git@main",
         "discord.py[voice]==2.5.2"
         ],
     entry_points={
