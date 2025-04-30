@@ -80,6 +80,10 @@ import functools
 # ------------------------------------------------------
 
 # --- discordspeechtotext 全域變數 ---
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+intents.voice_states = True
 whisper_model = None
 vad_model = None
 # 使用 lambda 初始化 defaultdict，避免 NameError
