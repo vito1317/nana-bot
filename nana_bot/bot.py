@@ -2,6 +2,7 @@
 import asyncio
 import traceback
 import discord
+from discord.ext.voice_recv.sinks import AudioSink, sinks
 from discord import app_commands, FFmpegPCMAudio, AudioSource
 from discord.ext import commands, tasks, voice_recv # Keep voice_recv
 from typing import Optional, Dict, List # Add List
@@ -148,7 +149,7 @@ class GoogleSpeechToText:
             return ''
 
 # --- Buffer Audio Sink Class (from example, modified flush) ---
-class BufferAudioSink(discord.AudioSink):
+class BufferAudioSink(AudioSink):
     def __init__(self, flush_callback):
         if not discord.opus.is_loaded():
             discord.opus.load_opus('opus') # Ensure opus is loaded
