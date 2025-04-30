@@ -21,5 +21,4 @@ soundfile
 google.cloud.speech_v1
 gapic-google-cloud-speech-v1
 whisper
-VAD_MODULE
 git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git
