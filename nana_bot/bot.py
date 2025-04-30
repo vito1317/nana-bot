@@ -2,7 +2,7 @@
 import asyncio
 import traceback
 import discord
-from discord.ext.voice_recv.sinks import AudioSink, sinks
+from discord.ext.voice_recv.sinks import AudioSink
 from discord import app_commands, FFmpegPCMAudio, AudioSource
 from discord.ext import commands, tasks, voice_recv # Keep voice_recv
 from typing import Optional, Dict, List # Add List
