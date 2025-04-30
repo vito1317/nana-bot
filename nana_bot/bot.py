@@ -24,10 +24,8 @@ import random
 import google.oauth2.service_account
 import google.cloud.speech_v1 as speech
 from google.api_core import exceptions as gc_exceptions
-
 from discord.ext.voice_recv import sinks
 from discord.ext import voice_recv
-# --------------------------------------------------------------------
 
 import logging
 import google.oauth2.service_account
@@ -96,7 +94,7 @@ class DebugDumpRawAudio:
             w.setframerate(sample_rate)
             w.writeframes(pcm_s16le)
 
-class BufferAudioSink(discord.AudioSink):
+class BufferAudioSink(sinks.AudioSink):
     def __init__(self, flush):
         super().__init__()
         self.flush = flush
