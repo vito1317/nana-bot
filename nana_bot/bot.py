@@ -1,67 +1,192 @@
 # -*- coding: utf-8 -*-
-import asyncio
-import traceback
-from discord.ext.voice_recv.extras import SpeechRecognitionSink
-from discord.ext.voice_recv import BasicSink
-import discord.ext.voice_recv
-import discord
-from discord import app_commands, FFmpegPCMAudio, AudioSource
-from discord.ext.voice_recv import sinks
-from discord.ext import commands, tasks, voice_recv
-from typing import Optional, Dict
-import sqlite3
-import logging
-from datetime import datetime, timedelta, timezone
-import json
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
-import requests
-from bs4 import BeautifulSoup
+import sys
+sys.path.insert(0, 'discord.py')
+import os
+import wave
 import time
-import re
-import pytz
-import audioop
-from collections import defaultdict
-import logging
-try:
-    from .commands import *
-except ImportError:
-    import commands
+import random
+import argparse
+import asyncio
+import numpy as np
+import discord
+import grpc
+import sqlite3
+# --- 以下是為了解決 Pylance reportUndefinedVariable 而補的 imports ---
 import queue
 import threading
-from nana_bot import (
-    bot,
-    bot_name,
-    WHITELISTED_SERVERS,
-    TARGET_CHANNEL_ID,
-    API_KEY,
-    init_db,
-    gemini_model,
-    servers,
-    send_daily_channel_id_list,
-    not_reviewed_id,
-    newcomer_channel_id,
-    welcome_channel_id,
-    member_remove_channel_id,
-    discord_bot_token,
-    review_format,
-    debug,
-    Point_deduction_system,
-    default_points
-)
-import os
-import torch, os, io
-from typing import Union, IO, Any
-from google.api_core import exceptions as gc_exceptions
-if not hasattr(torch.serialization, "FILE_LIKE"):
-    file_like_type = getattr(torch.serialization, "FileLike", Union[str, os.PathLike, IO[bytes]])
-    setattr(torch.serialization, "FILE_LIKE", file_like_type)
+from typing import Dict, Any, Optional
 
-import tempfile
+import grpc
+import numpy as np
+import wave
+import random
+
+import google.oauth2.service_account
+import google.cloud.speech_v1 as speech
+from google.api_core import exceptions as gc_exceptions
+
+from discord.ext.voice_recv import sinks
+from discord.ext import voice_recv
+# --------------------------------------------------------------------
+
+import logging
+import google.oauth2.service_account
+import google.cloud.speech_v1.gapic.transports.speech_grpc_transport as speech_transport
+from discord.ext import commands, tasks
+from discord import app_commands, FFmpegPCMAudio
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
 import edge_tts
+import tempfile
 import functools
+import requests
+from bs4 import BeautifulSoup
+import pytz
+import torch
+import io
 import speech_recognition as sr
-from google.cloud import speech
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google.api_core import exceptions as gc_exceptions
+import google.generativeai as genai
+from discord.opus import _load_default as _load_opus_default
+
+_load_opus_default()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+discord_logger = logging.getLogger('discord')
+discord_logger.setLevel(logging.WARNING)
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+class GoogleSpeechToText:
+    def __init__(self, endpoint, lang, recognition_model, api_credentials=None):
+        credentials = google.oauth2.service_account.Credentials.from_service_account_file(api_credentials) if api_credentials else grpc.local_channel_credentials()
+        LocalTransport = type('LocalTransport', (google.cloud.speech_v1.gapic.transports.speech_grpc_transport.SpeechGrpcTransport,), {
+            'create_channel': lambda self, address, credentials, **kwargs: grpc.secure_channel(address, credentials, **kwargs)
+        })
+        options = dict(api_endpoint=endpoint)
+        if api_credentials:
+            self.client = google.cloud.speech_v1.SpeechClient(credentials=credentials, client_options=options)
+        else:
+            transport = LocalTransport(address=endpoint, credentials=credentials)
+            self.client = google.cloud.speech_v1.SpeechClient(transport=transport, client_options=options)
+        self.lang = lang
+        self.model = recognition_model
+
+    def transcribe(self, pcm_s16le, sample_rate, num_channels):
+        res = self.client.recognize(
+            dict(audio_channel_count=num_channels, encoding='LINEAR16', sample_rate_hertz=sample_rate, language_code=self.lang, model=self.model),
+            dict(content=pcm_s16le)
+        )
+        return res.results[0].alternatives[0].transcript if res.results else ''
+
+class DebugDumpRawAudio:
+    def __init__(self, debug_dir):
+        os.makedirs(debug_dir, exist_ok=True)
+        self.debug_dir = debug_dir
+
+    def transcribe(self, pcm_s16le, sample_rate, num_channels):
+        path = os.path.join(self.debug_dir, f'{int(time.time())}.{random.randint(1000,9999)}.wav')
+        with wave.open(path, 'wb') as w:
+            w.setnchannels(num_channels)
+            w.setsampwidth(2)
+            w.setframerate(sample_rate)
+            w.writeframes(pcm_s16le)
+
+class BufferAudioSink(discord.AudioSink):
+    def __init__(self, flush):
+        super().__init__()
+        self.flush = flush
+        self.NUM_CHANNELS = discord.opus.Decoder.CHANNELS
+        self.NUM_SAMPLES = discord.opus.Decoder.SAMPLES_PER_FRAME
+        self.SAMPLE_RATE = discord.opus.Decoder.SAMPLING_RATE
+        self.BUFFER_FRAMES = 500
+        self.buffer = np.zeros((self.NUM_SAMPLES*self.BUFFER_FRAMES, self.NUM_CHANNELS), dtype='int16')
+        self.ptr = 0
+        self.speaker = None
+
+    def write(self, data):
+        if data.user is None:
+            return
+        frame = np.ndarray((self.NUM_SAMPLES, self.NUM_CHANNELS), dtype=self.buffer.dtype, buffer=data.data)
+        speaking = np.abs(frame).sum()>0
+        need_flush = self.ptr>=self.BUFFER_FRAMES-2 or (not speaking and self.ptr>self.BUFFER_FRAMES//2)
+        if speaking:
+            start = self.ptr*self.NUM_SAMPLES
+            end = (self.ptr+1)*self.NUM_SAMPLES
+            self.buffer[start:end] = frame
+            self.ptr+=1
+            self.speaker = data.user.id
+        if need_flush:
+            pcm = self.buffer.tobytes()
+            self.buffer.fill(0)
+            self.ptr=0
+            self.flush(self.speaker, pcm, self.SAMPLE_RATE, self.NUM_CHANNELS)
+
+class DiscordBotClient(commands.Bot):
+    def __init__(self, transcriber, **kwargs):
+        super().__init__(**kwargs)
+        self.transcriber = transcriber
+        self.voice_clients = {}
+        self.text_channel = None
+        self.queue = []
+        self.loop.create_task(self._send_loop())
+
+    def transcribe(self, speaker, pcm, rate, chans):
+        hyp = self.transcriber.transcribe(pcm, rate, chans)
+        if hyp:
+            self.queue.append((speaker, hyp))
+
+    async def _send_loop(self):
+        await self.wait_until_ready()
+        while True:
+            if self.queue and self.text_channel:
+                for spk, msg in self.queue:
+                    mem = self.guilds[0].get_member(spk)
+                    name = mem.display_name if mem else 'N/A'
+                    await self.text_channel.send(f'[{name}] says: {msg}')
+                self.queue=[]
+            await asyncio.sleep(0.25)
+
+    async def on_ready(self):
+        self.text_channel = discord.utils.get(self.get_all_channels(), name=os.getenv('TEXT_CHANNEL','general'))
+        logging.info(f'已登入為 {self.user} (ID: {self.user.id})')
+
+def get_current_time_utc8():
+    return (datetime.now(timezone.utc)+timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+
+# 載入 config
+from nana_bot import (
+    API_KEY, gemini_model, bot_name, debug, Point_deduction_system, default_points,
+    review_format, servers, send_daily_channel_id_list, newcomer_channel_id,
+    member_remove_channel_id, not_reviewed_id, welcome_channel_id, WHITELISTED_SERVERS,
+    TARGET_CHANNEL_ID, discord_bot_token
+)
+genai.configure(api_key=API_KEY)
+model = genai.GenerativeModel(gemini_model) if API_KEY else None
+
+transcriber = GoogleSpeechToText(
+    endpoint=google.cloud.speech_v1.SpeechClient.SERVICE_ADDRESS,
+    lang='zh-TW',
+    recognition_model='phone_call',
+    api_credentials=os.getenv('GOOGLE_API_CRED')
+) if not debug else DebugDumpRawAudio(debug)
+
+bot = DiscordBotClient(
+    transcriber=transcriber,
+    command_prefix="/",
+    intents=intents
+)
+
+# 以下保留您原來 bot.py 裡所有 on_member_join, on_message, send_daily_message, init_db_for_guild, play_tts, /search 等功能
+# ……（請將原本的所有非 STT、非 join/leave 定義直接貼在這裡）……
+
+
+
+
 audio_queues: Dict[int, queue.Queue] = {}
 transcribe_threads: Dict[int, threading.Thread] = {}
 transcribe_tasks = {}
@@ -739,7 +864,23 @@ async def on_member_remove(member):
 
     except Exception as e:
         logger.exception(f"Unexpected error during on_member_remove for {member.name} (ID: {member.id}) in guild {guild.id}: {e}")
+@bot.tree.command(name='transcribeyes')
+async def _tran_start(interaction: discord.Interaction):
+    vc = await interaction.user.voice.channel.connect()
+    gid = interaction.guild.id
+    sink = BufferAudioSink(bot.transcribe)
+    vc.listen(sink)
+    bot.voice_clients[gid] = vc
+    await interaction.response.send_message("✅ 已啟動 STT！", ephemeral=True)
 
+@bot.tree.command(name='transcribenot')
+async def _tran_stop(interaction: discord.Interaction):
+    gid = interaction.guild.id
+    vc = bot.voice_clients.pop(gid, None)
+    if vc and vc.is_connected():
+        vc.stop_listening()
+        await vc.disconnect()
+    await interaction.response.send_message("👋 已停止 STT 並離開語音。", ephemeral=True)
 async def after_listening(sink: sinks.WaveSink, channel: discord.TextChannel, vc: discord.VoiceClient):
     logger.info(f"[STT] after_listening 開始執行，sink.audio_data 長度 = {len(sink.audio_data)}")
     loop = asyncio.get_running_loop()
@@ -1552,10 +1693,14 @@ def bot_run():
         logger.info("機器人進程已停止。")
 
 
-if __name__ == "__main__":
-    logger.info("從主執行區塊啟動機器人...")
-    bot_run()
-    logger.info("機器人執行完畢。")
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--discord-bot-token-file', required=True)
+    parser.add_argument('--google-api-credentials-file', required=True)
+    parser.add_argument('--debug')
+    args = parser.parse_args()
+    with open(args.discord_bot_token_file) as f:
+        token = f.read().strip()
 
 
 __all__ = ['bot_run', 'bot']

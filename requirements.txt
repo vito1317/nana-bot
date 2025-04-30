@@ -18,4 +18,5 @@ py-cord
 discord-ext-voice-recv[extras]
 discord.py[voice]==2.5.2
 soundfile
+google.cloud.speech_v1
 git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git
