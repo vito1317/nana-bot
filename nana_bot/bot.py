@@ -32,7 +32,7 @@ except ImportError:
 import queue # 這個 Queue 可能不再需要，除非 discordspeechtotext 內部使用
 import threading # 這個 Thread 可能不再需要
 from nana_bot import (
-    bot,
+    bot, # <--- 需要 bot 物件來取得 loop
     bot_name,
     WHITELISTED_SERVERS,
     TARGET_CHANNEL_ID,
@@ -80,10 +80,6 @@ import functools
 # ------------------------------------------------------
 
 # --- discordspeechtotext 全域變數 ---
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-intents.voice_states = True
 whisper_model = None
 vad_model = None
 # 使用 lambda 初始化 defaultdict，避免 NameError
@@ -132,6 +128,7 @@ discord_logger.setLevel(logging.WARNING)
 #         self.buffers = defaultdict(io.BytesIO)
 #         self.speaking_users = set() # 追蹤正在說話的使用者
 #         self.callback = callback # 儲存回調函數
+#         self.loop = bot.loop # 獲取主事件循環
 #
 #     @property
 #     def wants_opus(self) -> bool:
@@ -139,38 +136,36 @@ discord_logger.setLevel(logging.WARNING)
 #         return False
 #
 #     def write(self, user, data): # data 是 voice_recv.VoiceData 對象
-#         # *** 修正：添加 user 檢查 ***
 #         if user is None:
 #             logger.warning("[BufferAudioSink] Received data with user=None, skipping.")
 #             return
 #
-#         # 這裡可以加入 VAD 邏輯
-#         # 假設 VAD 判斷 user.id 正在說話
 #         is_speaking = True # <--- 替換成你的 VAD 判斷邏輯
 #         if is_speaking:
 #             if user.id not in self.speaking_users:
 #                 self.speaking_users.add(user.id)
 #             buffer = self.buffers[user.id]
-#             buffer.write(data.pcm) # 從 VoiceData 獲取 PCM bytes
+#             buffer.write(data.pcm)
 #         else:
-#             # 如果之前在說話，現在停止了
 #             if user.id in self.speaking_users:
 #                 self.speaking_users.remove(user.id)
 #                 buffer = self.buffers.pop(user.id, None)
 #                 if buffer:
 #                     buffer.seek(0)
-#                     # 呼叫你的回調函數處理完整的語音片段
-#                     asyncio.create_task(self.callback(user, buffer.read())) # 傳遞用戶和 bytes
+#                     # 使用 run_coroutine_threadsafe
+#                     future = asyncio.run_coroutine_threadsafe(self.callback(user, buffer.read()), self.loop)
+#                     try:
+#                         future.result(timeout=0.1) # 短暫等待，避免阻塞，但可以捕捉立即的錯誤
+#                     except asyncio.TimeoutError:
+#                         pass # 任務已提交，繼續執行
+#                     except Exception as e:
+#                         logger.error(f"[BufferAudioSink] Error submitting callback task: {e}")
 #                     buffer.close()
 #
 #     def cleanup(self):
-#         # 在 Sink 結束時清理資源
 #         logger.info("[BufferAudioSink] Cleanup called.")
 #         for user_id, buffer in self.buffers.items():
-#             # 處理可能殘留的 buffer (例如突然斷線)
 #             logger.warning(f"[BufferAudioSink] Cleaning up remaining buffer for user {user_id}")
-#             # 你可以選擇是否處理這些殘留的 buffer
-#             # asyncio.create_task(self.callback(user_id, buffer.read())) # 示例：嘗試處理
 #             buffer.close()
 #         self.buffers.clear()
 #         self.speaking_users.clear()
@@ -799,6 +794,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
         user (discord.Member): 說話的使用者。
         channel (discord.TextChannel): 指令發起的文字頻道。
     """
+    logger.info(f'已辨識文字:{user.display_name}說{text}')
     if not text:
         return
     # *** 修正：添加 user 檢查 ***
@@ -808,7 +804,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
     logger.info(f"[STT_Result] 來自 {user.display_name} (ID: {user.id}) 的辨識結果: '{text}'")
     # 可以在這裡選擇性地將辨識結果發送到文字頻道
-    # await channel.send(f"🔊 {user.display_name} 說：「{text}」")
+    await channel.send(f"🔊 {user.display_name} 說：「{text}」")
 
     # 檢查啟動詞
     if STT_ACTIVATION_WORD.lower() not in text.lower():
@@ -940,16 +936,14 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
     """
     global vad_states, audio_buffers, vad_model
 
-    # *** 修正：添加 member 檢查 ***
     if member is None:
-        logger.warning(f"[AudioProc] Received audio data with member=None in guild {guild_id}, skipping.")
+        # logger.warning(f"[AudioProc] Received audio data with member=None in guild {guild_id}, skipping.")
         return
 
     user_id = member.id
     pcm_data = audio_data.pcm
 
     try:
-        # 簡易能量檢測作為 VAD 替代方案
         is_speaking_now = np.abs(np.frombuffer(pcm_data, dtype=np.int16)).mean() > 500
 
         user_state = vad_states.setdefault(user_id, {'is_speaking': False, 'silence_frames': 0})
@@ -965,18 +959,28 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                 if user_state['silence_frames'] > 50: # 1 秒靜音閾值
                     user_state['is_speaking'] = False
                     logger.info(f"[VAD] Detected end of speech for {member.display_name}")
-                    full_speech = audio_buffers.pop(user_id, b"") # 使用 pop 清理緩衝區
+                    full_speech = audio_buffers.pop(user_id, b"")
                     user_state['silence_frames'] = 0
 
-                    if len(full_speech) > 48000 * 1 * 2 * 0.5: # 忽略 < 0.5 秒
+                    if len(full_speech) > 48000 * 1 * 2 * 0.5:
                         logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech)} bytes)")
-                        asyncio.create_task(run_whisper_transcription(full_speech, member, channel))
+                        # *** 修正：使用 run_coroutine_threadsafe ***
+                        future = asyncio.run_coroutine_threadsafe(
+                            run_whisper_transcription(full_speech, member, channel),
+                            bot.loop # 傳入主事件循環
+                        )
+                        try:
+                            # 短暫等待以捕捉立即的錯誤，但不要阻塞回調線程
+                            future.result(timeout=0.1)
+                        except asyncio.TimeoutError:
+                            pass # 任務已成功提交
+                        except Exception as e:
+                            logger.error(f"[AudioProc] Error submitting whisper task for {member.display_name}: {e}")
                     else:
                         logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech)} bytes), skipping Whisper.")
 
     except Exception as e:
         logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
-        # 清理出錯用戶的狀態
         if user_id in vad_states: del vad_states[user_id]
         if user_id in audio_buffers: del audio_buffers[user_id]
 
@@ -992,7 +996,6 @@ async def run_whisper_transcription(audio_bytes: bytes, member: discord.Member, 
         channel (discord.TextChannel): 文字頻道。
     """
     global whisper_model
-    # *** 修正：添加 member 檢查 ***
     if member is None:
         logger.warning("[Whisper] Received transcription task with member=None, skipping.")
         return
