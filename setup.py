@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.9.9.8.8.7.7.6.6.5.5.4.4.3.3.2.2.4",
+    version="5.8.9.9.8.8.7.7.6.6.5.5.4.4.3.3.2.2.5",
     license="MIT",
     author="Vito1317",
     author_email="service@vito1317.com",
@@ -24,6 +24,10 @@ setuptools.setup(
         "pyparsing>=3.0.0",
         "urllib3>=1.26.0,<2.0",
         "discord.py",
+        "google-auth>=2.14.1,<3.0.0,!=2.24.0,!=2.25.0",
+        "rsa>=4.8,<5.0",
+        "pyasn1>=0.4.8",
+        "pyasn1-modules>=0.2.7"
         "google-generativeai",
         "requests",
         "beautifulsoup4",
