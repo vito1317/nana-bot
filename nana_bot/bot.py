@@ -59,7 +59,15 @@ import io
 
 whisper_model = None
 vad_model = None
-vad_utils = None
+# --- Removed vad_utils ---
+# vad_utils = None
+# --- Declare unpacked functions as global ---
+get_speech_ts = None
+save_audio = None
+read_audio = None
+VADIterator = None
+collect_chunks = None
+
 
 VAD_SAMPLE_RATE = 16000
 VAD_THRESHOLD = 0.5
@@ -854,12 +862,14 @@ def convert_and_resample_audio(pcm_data: bytes, original_sr: int, target_sr: int
 
 
 def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel):
-    global audio_buffers, vad_model, vad_utils
+    # --- Use global VAD model and unpacked functions directly ---
+    global audio_buffers, vad_model, get_speech_ts
 
     if member is None or member.bot:
         return
-    if not vad_model or not vad_utils:
-        logger.error("[VAD] VAD model or utils not loaded. Cannot process audio chunk.")
+    # --- Check if vad_model and the necessary function get_speech_ts are loaded ---
+    if not vad_model or not get_speech_ts:
+        logger.error("[VAD] VAD model or get_speech_ts function not loaded. Cannot process audio chunk.")
         return
 
     user_id = member.id
@@ -873,28 +883,24 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
              logger.warning(f"[VAD] Skipping VAD check for user {member.display_name} due to conversion/resample error.")
              return
 
-        speech_timestamps = vad_utils.get_speech_ts(resampled_mono_tensor_16k, vad_model, threshold=VAD_THRESHOLD, sampling_rate=VAD_SAMPLE_RATE)
+        # --- Use the global get_speech_ts directly ---
+        speech_timestamps = get_speech_ts(resampled_mono_tensor_16k, vad_model, threshold=VAD_THRESHOLD, sampling_rate=VAD_SAMPLE_RATE)
         is_speech_now = len(speech_timestamps) > 0
 
-        # --- Start Modification: Convert 16kHz tensor to bytes for buffer ---
         pcm_data_mono_16k_bytes = b''
-        if resampled_mono_tensor_16k.numel() > 0: # Check if tensor is not empty
+        if resampled_mono_tensor_16k.numel() > 0:
             try:
-                # Convert float32 tensor [-1.0, 1.0] to int16 numpy array [-32768, 32767]
                 audio_int16_16k = (resampled_mono_tensor_16k.numpy() * 32768.0).astype(np.int16)
-                # Convert numpy array to bytes
                 pcm_data_mono_16k_bytes = audio_int16_16k.tobytes()
             except Exception as conversion_e:
                  logger.error(f"[VAD/Buffer] Error converting 16kHz tensor to bytes for user {member.display_name}: {conversion_e}")
-                 return # Don't proceed if conversion fails
-        # --- End Modification ---
+                 return
 
 
         user_state = audio_buffers[user_id]
         current_time = time.time()
 
         if is_speech_now:
-            # --- Modification: Append 16kHz bytes ---
             user_state['buffer'].extend(pcm_data_mono_16k_bytes)
             user_state['last_speech_time'] = current_time
             if not user_state['is_speaking']:
@@ -909,10 +915,8 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                     full_speech_buffer = bytes(user_state['buffer'])
                     user_state['buffer'] = bytearray()
 
-                    # --- Modification: Check length based on 16kHz sample rate ---
-                    min_bytes_16k = int(VAD_SAMPLE_RATE * 2 * 0.2) # 0.2 seconds at 16kHz, 2 bytes/sample
+                    min_bytes_16k = int(VAD_SAMPLE_RATE * 2 * 0.2)
                     if len(full_speech_buffer) > min_bytes_16k:
-                        # --- Modification: Pass VAD_SAMPLE_RATE (16000) to Whisper ---
                         logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes of {VAD_SAMPLE_RATE}Hz mono audio)")
                         asyncio.create_task(
                             run_whisper_transcription(full_speech_buffer, VAD_SAMPLE_RATE, member, channel)
@@ -920,7 +924,6 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                     else:
                          logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes at 16kHz), skipping Whisper.")
                 else:
-                    # --- Modification: Append 16kHz bytes even during short silence ---
                     user_state['buffer'].extend(pcm_data_mono_16k_bytes)
 
     except Exception as e:
@@ -940,20 +943,17 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member
     guild_id = channel.guild.id
     try:
         start_time = time.time()
-        # --- Modification: Log the correct sample rate (should be 16000 now) ---
         logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes {sample_rate}Hz MONO 音訊...")
 
-        # 1. Convert mono int16 bytes (at sample_rate Hz) to numpy float32 array
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
-        # 2. Run transcription
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             functools.partial(
                 whisper_model.transcribe,
-                audio_float32, # Pass the float32 numpy array (now at 16kHz)
+                audio_float32,
                 language=STT_LANGUAGE,
                 fp16=torch.cuda.is_available(),
             )
@@ -963,7 +963,6 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member
         duration = time.time() - start_time
         logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s (Guild: {guild_id})。結果: '{text}'")
 
-        # 3. Handle the transcription result
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
@@ -1789,21 +1788,32 @@ def bot_run():
     if not servers:
          logger.warning("設定檔中 'servers' 列表為空或未設定。機器人可能無法正確處理多伺服器設定。")
 
-    global whisper_model, vad_model, vad_utils
+    # --- Use global declarations for VAD model and unpacked functions ---
+    global whisper_model, vad_model, get_speech_ts, save_audio, read_audio, VADIterator, collect_chunks
     try:
         logger.info("正在載入 VAD 模型 (Silero VAD)...")
         torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
-        # --- Modification: trust_repo=True might be necessary depending on environment ---
         vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
                                           model='silero_vad',
                                           force_reload=False,
-                                          trust_repo=True) # Added trust_repo=True
-        (get_speech_ts,
-         save_audio,
-         read_audio,
-         VADIterator,
-         collect_chunks) = utils
-        vad_utils = utils
+                                          trust_repo=True)
+
+        # --- Unpack utils into global functions ---
+        (get_speech_ts_local,
+         save_audio_local,
+         read_audio_local,
+         VADIterator_local,
+         collect_chunks_local) = utils # Use local names during unpacking
+
+        # --- Assign to global variables ---
+        get_speech_ts = get_speech_ts_local
+        save_audio = save_audio_local
+        read_audio = read_audio_local
+        VADIterator = VADIterator_local
+        collect_chunks = collect_chunks_local
+
+        # --- Remove the incorrect assignment ---
+        # vad_utils = utils
 
         logger.info("VAD 模型及工具載入完成。")
 
@@ -1816,7 +1826,12 @@ def bot_run():
         logger.critical(f"載入 STT 或 VAD 模型失敗: {e}", exc_info=True)
         logger.warning("STT/VAD 功能可能無法使用。")
         vad_model = None
-        vad_utils = None
+        # --- Set unpacked functions to None on error ---
+        get_speech_ts = None
+        save_audio = None
+        read_audio = None
+        VADIterator = None
+        collect_chunks = None
         whisper_model = None
 
     logger.info("正在嘗試啟動機器人...")
