@@ -57,6 +57,8 @@ import whisper
 import tempfile
 import edge_tts
 import functools
+import wave # Added for saving WAV
+import uuid # Added for unique filenames
 
 
 whisper_model = None
@@ -705,15 +707,21 @@ async def on_member_remove(member):
 
 async def handle_stt_result(text: str, user: discord.Member, channel: discord.TextChannel):
 
-    logger.info(f'已辨識文字:{user.display_name}說{text}')
+    logger.info(f'已辨識文字:{user.display_name}說{text}') # Log includes the potentially empty text
     if not text:
-        return
+        # Optionally, inform the user that nothing was transcribed
+        # try:
+        #     await channel.send(f"🎤 {user.display_name}，我好像沒聽清楚你說了什麼。")
+        # except discord.HTTPException:
+        #     pass
+        return # Stop processing if text is empty
     if user is None:
         logger.warning("[STT_Result] Received result with user=None, skipping.")
         return
 
     logger.info(f"[STT_Result] 來自 {user.display_name} (ID: {user.id}) 的辨識結果: '{text}'")
     try:
+        # Report the transcription result (even if it was empty before the 'if not text' check)
         await channel.send(f"🔊 {user.display_name} 說：「{text}」")
     except discord.HTTPException as e:
         logger.error(f"[STT_Result] 發送辨識結果訊息失敗: {e}")
@@ -975,45 +983,83 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         if user_id in audio_buffers: del audio_buffers[user_id] # Ensure cleanup even on error
 
 
-
 async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member: discord.Member, channel: discord.TextChannel):
+    """
+    在背景執行 Whisper 辨識。
 
+    Args:
+        audio_bytes (bytes): 完整的 PCM 語音片段 (int16).
+        sample_rate (int): 音訊的取樣率 (Should be 48000 from the buffer).
+        member (discord.Member): 說話的使用者 (可能為 None).
+        channel (discord.TextChannel): 文字頻道。
+    """
     global whisper_model
     if member is None:
         logger.warning("[Whisper] Received transcription task with member=None, skipping.")
         return
     if not whisper_model:
          logger.error("[Whisper] Whisper model not loaded. Cannot transcribe.")
-
          return
 
     try:
         start_time = time.time()
         logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes 音訊 (SR: {sample_rate})...")
 
+        # --- DEBUG: Save audio chunk being sent to Whisper ---
+        try:
+            debug_audio_dir = "whisper_debug_audio"
+            os.makedirs(debug_audio_dir, exist_ok=True)
+            debug_filename = os.path.join(debug_audio_dir, f"input_{member.id}_{uuid.uuid4()}.wav")
+            with wave.open(debug_filename, 'wb') as wf:
+                wf.setnchannels(1)  # Mono
+                wf.setsampwidth(2)  # 16-bit -> 2 bytes per sample
+                wf.setframerate(sample_rate) # Use the original sample rate (48kHz)
+                wf.writeframes(audio_bytes)
+            logger.info(f"[Whisper Debug] Saved audio chunk for {member.display_name} to {debug_filename}")
+        except Exception as save_e:
+            logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
+        # --- End DEBUG ---
 
+        # 1. Convert bytes to NumPy array (int16)
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-
+        # 2. Convert to float32, required by Whisper model
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
+        # --- DEBUG: Check audio array stats ---
+        if len(audio_float32) > 0:
+             logger.debug(f"[Whisper Debug] Audio float32 stats: min={np.min(audio_float32):.4f}, max={np.max(audio_float32):.4f}, mean={np.mean(audio_float32):.4f}")
+        else:
+             logger.debug("[Whisper Debug] Audio float32 array is empty.")
+        # --- End DEBUG ---
 
+
+        # 3. Perform transcription in executor
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None,
+            None, # Use default ThreadPoolExecutor
             functools.partial(
                 whisper_model.transcribe,
                 audio_float32,
                 language=STT_LANGUAGE,
                 fp16=torch.cuda.is_available(),
-
+                # Consider adding/tuning these if needed:
+                # no_speech_threshold=0.6, # Default: 0.6; lower = more sensitive to non-speech
+                # logprob_threshold=-1.0, # Default: -1.0; lower = allows lower probability sequences
             )
         )
-        text = result.get("text", "").strip()
+        # Ensure result is a dictionary before accessing 'text'
+        text = ""
+        if isinstance(result, dict):
+            text = result.get("text", "").strip()
+        else:
+            logger.warning(f"[Whisper] Unexpected result type from transcribe: {type(result)}")
+
 
         duration = time.time() - start_time
+        # Log the result here *after* getting it
         logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s。結果: '{text}'")
 
-
+        # 4. Pass result (even if empty) to handler
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
@@ -1862,10 +1908,10 @@ def bot_run():
 
         logger.info("VAD 模型載入完成。")
 
-        logger.info("正在載入 Whisper 模型 (base)...")
+        logger.info("正在載入 Whisper 模型 (base)...") # Consider changing model here if needed
 
 
-        whisper_model = whisper.load_model("base")
+        whisper_model = whisper.load_model("base") # Change "base" to "small" or "medium" for better accuracy
         logger.info(f"Whisper 模型載入完成。 Device: {whisper_model.device}")
 
     except Exception as e:
