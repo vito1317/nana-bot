@@ -344,7 +344,7 @@ async def on_ready():
 
         for guild in bot.guilds:
              try:
-                 synced = await bot.tree.sync(guild=guild)
+                 synced = await bot.tree.sync()
                  synced_commands += len(synced)
                  logger.debug(f"已為伺服器 {guild.id} ({guild.name}) 同步 {len(synced)} 個命令。")
              except discord.errors.Forbidden:
