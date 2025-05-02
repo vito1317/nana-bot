@@ -1141,7 +1141,6 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
 
 
 @bot.tree.command(name='join', description="讓機器人加入您所在的語音頻道並開始聆聽")
-@app_commands.guild_only()
 async def join(interaction: discord.Interaction):
     """Joins the user's voice channel and starts listening for STT."""
     if not interaction.user.voice or not interaction.user.voice.channel:
@@ -1243,7 +1242,6 @@ async def join(interaction: discord.Interaction):
 
 
 @bot.tree.command(name='leave', description="讓機器人停止聆聽並離開語音頻道")
-@app_commands.guild_only()
 async def leave(interaction: discord.Interaction):
     """Stops listening and disconnects the bot from the voice channel."""
     guild = interaction.guild
@@ -1287,7 +1285,6 @@ async def leave(interaction: discord.Interaction):
 
 
 @bot.tree.command(name='stop_listening', description="讓機器人停止監聽語音 (但保持在頻道中)")
-@app_commands.guild_only()
 async def stop_listening(interaction: discord.Interaction):
     """Stops the bot from listening to audio but remains in the voice channel."""
     guild = interaction.guild
@@ -1351,7 +1348,6 @@ async def stop_listening(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="ask_voice", description=f"準備讓 {bot_name} 聆聽您接下來的語音提問")
-@app_commands.guild_only()
 async def ask_voice(interaction: discord.Interaction):
     """Signals the bot to process the user's next speech utterance as an AI query."""
     global expecting_voice_query_from
