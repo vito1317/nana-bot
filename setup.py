@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.9.9.8.8.7.7.6.6.5.5.4.4.3.3.2.2.7",
+    version="5.8.9.9.8.8.7.7.6.6.5.5.4.4.3.3.2.2.8",
     license="MIT",
     author="Vito1317",
     author_email="service@vito1317.com",
@@ -19,7 +19,7 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.12',
+    python_requires='>=3.9',
     install_requires=[
         "pyparsing>=3.0.0",
         "urllib3>=1.26.0,<2.0",
