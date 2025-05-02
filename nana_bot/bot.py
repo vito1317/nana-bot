@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import traceback
-# 移除 discord.ext.voice_recv.extras 的 SpeechRecognitionSink (如果不再使用)
-# from discord.ext.voice_recv.extras import SpeechRecognitionSink
-from discord.ext.voice_recv import BasicSink # <--- 使用這個內建的 Sink
+from discord.ext.voice_recv import BasicSink
 import discord.ext.voice_recv
 import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
-# 修正：AudioSink 應從 discord.ext.voice_recv.sinks 導入
-from discord.ext.voice_recv.sinks import AudioSink # <--- 如果需要自定義 Sink，請用這個導入
+from discord.ext.voice_recv.sinks import AudioSink
 from discord.ext import commands, tasks, voice_recv
 from typing import Optional, Dict
 import sqlite3
@@ -22,17 +19,16 @@ from bs4 import BeautifulSoup
 import time
 import re
 import pytz
-# import audioop # 可能不再需要
 from collections import defaultdict
 import logging
 try:
     from .commands import *
 except ImportError:
     import commands
-import queue # 這個 Queue 可能不再需要，除非 discordspeechtotext 內部使用
-import threading # 這個 Thread 可能不再需要
+import queue
+import threading
 from nana_bot import (
-    bot, # <--- 需要 bot 物件來取得 loop
+    bot,
     bot_name,
     WHITELISTED_SERVERS,
     TARGET_CHANNEL_ID,
@@ -52,49 +48,33 @@ from nana_bot import (
     default_points
 )
 import os
-# --- discordspeechtotext 可能需要的依賴 ---
-import numpy as np # 範例：用於音訊處理
-import torch # 範例，根據 discordspeechtotext 的需求添加
-import torchaudio # 範例
-import whisper # 導入 whisper
-# from VAD_MODULE import VADDetector # 範例，替換成 discordspeechtotext 的 VAD 模組
-# -----------------------------------------
+import numpy as np
+import torch
+import torchaudio
+import whisper
 
-# 移除 Google Cloud Speech 相關的檢查和導入
-# from google.api_core import exceptions as gc_exceptions
-# if not hasattr(torch.serialization, "FILE_LIKE"):
-#     file_like_type = getattr(torch.serialization, "FileLike", Union[str, os.PathLike, IO[bytes]])
-#     setattr(torch.serialization, "FILE_LIKE", file_like_type)
 
 import tempfile
 import edge_tts
 import functools
-# import speech_recognition as sr # 移除舊的 sr 函式庫，除非仍需錄音功能
-# from google.cloud import speech # 移除 Google Cloud Speech
 
-# --- 移除 Google Cloud Speech 相關的全域變數和初始化 ---
-# audio_queues: Dict[int, queue.Queue] = {}
-# transcribe_threads: Dict[int, threading.Thread] = {}
-# transcribe_tasks = {}
-# speech_client = speech.SpeechClient()
-# ------------------------------------------------------
 
-# --- discordspeechtotext 全域變數 ---
 whisper_model = None
 vad_model = None
-# 使用 lambda 初始化 defaultdict，避免 NameError
-audio_buffers = defaultdict(bytes)
-vad_states = defaultdict(lambda: {'is_speaking': False, 'silence_frames': 0})
-# -------------------------------------------
+# --- VAD 相關設定 ---
+VAD_SAMPLE_RATE = 16000 # Silero VAD 模型期望的取樣率
+VAD_THRESHOLD = 0.5    # VAD 判斷為語音的閾值
+VAD_MIN_SILENCE_DURATION_MS = 700 # 判斷語句結束所需的最小靜音時長 (毫秒)
+VAD_SPEECH_PAD_MS = 200 # 在語音片段前後增加的緩衝時間 (毫秒)
+# --------------------
 
-listening_guilds: Dict[int, discord.VoiceClient] = {} # 這個可能仍然需要，用於追蹤機器人是否在監聽
-voice_clients: Dict[int, discord.VoiceClient] = {} # 這個仍然需要，用於管理語音連接
+# 使用 defaultdict 來儲存每個使用者的音訊緩衝區和 VAD 狀態
+# audio_buffers[user_id] = { 'buffer': bytearray(), 'last_speech_time': time.time(), 'is_speaking': False }
+audio_buffers = defaultdict(lambda: {'buffer': bytearray(), 'last_speech_time': time.time(), 'is_speaking': False})
 
-# --- 移除 Google Cloud Speech 的相關函數 ---
-# def generate_google_requests(audio_queue: queue.Queue): ...
-# async def transcribe_stream(audio_queue: queue.Queue, channel, vc): ...
-# async def streaming_runner(audio_queue, channel, vc): ...
-# ---------------------------------------------
+listening_guilds: Dict[int, discord.VoiceClient] = {}
+voice_clients: Dict[int, discord.VoiceClient] = {}
+
 
 import io
 
@@ -107,7 +87,7 @@ safety_settings = {
 
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
 STT_ACTIVATION_WORD = bot_name
-STT_LANGUAGE = "zh" # Whisper 通常使用 'zh' 代表中文
+STT_LANGUAGE = "zh"
 
 logging.basicConfig(level=logging.INFO if not debug else logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -119,61 +99,10 @@ logger = logging.getLogger(__name__)
 discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(logging.WARNING)
 
-# recognizer = sr.Recognizer() # 移除舊的 sr Recognizer
 
-# --- 如果你需要自定義 Sink (例如 BufferAudioSink)，請確保繼承自正確的類別並實作必要方法 ---
-# class BufferAudioSink(AudioSink): # 或者 voice_recv.sinks.AudioSink
-#     def __init__(self, callback): # 假設你的 Sink 需要一個回調
-#         super().__init__()
-#         self.buffers = defaultdict(io.BytesIO)
-#         self.speaking_users = set() # 追蹤正在說話的使用者
-#         self.callback = callback # 儲存回調函數
-#         self.loop = bot.loop # 獲取主事件循環
-#
-#     @property
-#     def wants_opus(self) -> bool:
-#         # 返回 False 表示你需要 discord.py 為你解碼成 PCM
-#         return False
-#
-#     def write(self, user, data): # data 是 voice_recv.VoiceData 對象
-#         if user is None:
-#             logger.warning("[BufferAudioSink] Received data with user=None, skipping.")
-#             return
-#
-#         is_speaking = True # <--- 替換成你的 VAD 判斷邏輯
-#         if is_speaking:
-#             if user.id not in self.speaking_users:
-#                 self.speaking_users.add(user.id)
-#             buffer = self.buffers[user.id]
-#             buffer.write(data.pcm)
-#         else:
-#             if user.id in self.speaking_users:
-#                 self.speaking_users.remove(user.id)
-#                 buffer = self.buffers.pop(user.id, None)
-#                 if buffer:
-#                     buffer.seek(0)
-#                     # 使用 run_coroutine_threadsafe
-#                     future = asyncio.run_coroutine_threadsafe(self.callback(user, buffer.read()), self.loop)
-#                     try:
-#                         future.result(timeout=0.1) # 短暫等待，避免阻塞，但可以捕捉立即的錯誤
-#                     except asyncio.TimeoutError:
-#                         pass # 任務已提交，繼續執行
-#                     except Exception as e:
-#                         logger.error(f"[BufferAudioSink] Error submitting callback task: {e}")
-#                     buffer.close()
-#
-#     def cleanup(self):
-#         logger.info("[BufferAudioSink] Cleanup called.")
-#         for user_id, buffer in self.buffers.items():
-#             logger.warning(f"[BufferAudioSink] Cleaning up remaining buffer for user {user_id}")
-#             buffer.close()
-#         self.buffers.clear()
-#         self.speaking_users.clear()
-# -------------------------------------------------------------------------
 
 
 async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
-    # ... (TTS 函數保持不變) ...
     total_start = time.time()
     if not voice_client or not voice_client.is_connected():
         logger.warning(f"[{context}] 無效或未連接的 voice_client，無法播放 TTS: '{text}'")
@@ -191,7 +120,8 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
             tmp_path = tmp.name
         logger.debug(f"[{context}] 暫存檔案路徑: {tmp_path}")
-        await communicate.save(tmp_path)
+        # 使用非同步方式儲存檔案
+        await loop.run_in_executor(None, functools.partial(communicate.save_sync, tmp_path))
         logger.info(f"[{context}] 步驟 1 (生成音檔) 耗時 {time.time()-step1:.4f}s -> {tmp_path}")
 
         step2 = time.time()
@@ -203,6 +133,7 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
              logger.error(f"[{context}] 暫存檔案 {tmp_path} 在創建音源前消失了！")
              return
 
+        # 使用 run_in_executor 創建 FFmpegPCMAudio 以避免阻塞事件循環
         source = await loop.run_in_executor(
             None,
             lambda: FFmpegPCMAudio(tmp_path, **ffmpeg_options)
@@ -211,14 +142,22 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
 
         if not voice_client.is_connected():
              logger.warning(f"[{context}] 創建音源後，語音客戶端已斷開連接。")
+             # 清理未播放的檔案
+             if tmp_path and os.path.exists(tmp_path):
+                 try:
+                     os.remove(tmp_path)
+                     logger.info(f"[{context}][Cleanup] 已清理因斷線未播放的暫存檔案: {tmp_path}")
+                 except OSError as e:
+                     logger.warning(f"[{context}][Cleanup] 清理未播放暫存檔 {tmp_path} 失敗: {e}")
              return
 
         if voice_client.is_playing():
             logger.info(f"[{context}] 停止當前播放以播放新的 TTS。")
             voice_client.stop()
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.1) # 短暫等待確保停止完成
 
         step3 = time.time()
+        # 清理函數，確保在播放完成或出錯時刪除暫存檔案
         def _cleanup(error, path_to_clean):
             log_prefix = f"[{context}][Cleanup]"
             if error:
@@ -234,6 +173,7 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
             except Exception as cleanup_err:
                  logger.error(f"{log_prefix} 清理檔案時發生錯誤: {cleanup_err}")
 
+        # 使用 lambda 將 tmp_path 傳遞給 after 回調
         voice_client.play(source, after=lambda e, p=tmp_path: _cleanup(e, p))
         playback_started = True
         logger.info(f"[{context}] 步驟 3 (開始播放) 耗時 {time.time()-step3:.4f}s (背景執行)")
@@ -251,6 +191,7 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
         logger.exception(f"[{context}] play_tts 中發生非預期錯誤。 文字: '{text[:50]}...'")
 
     finally:
+        # 如果播放未成功開始，且暫存檔案存在，則清理
         if not playback_started and tmp_path and os.path.exists(tmp_path):
             logger.warning(f"[{context}][Finally] 播放未成功開始，清理暫存檔案: {tmp_path}")
             try:
@@ -262,7 +203,6 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
 
 
 def get_current_time_utc8():
-    # ... (保持不變) ...
     utc8 = timezone(timedelta(hours=8))
     current_time = datetime.now(utc8)
     return current_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -278,13 +218,11 @@ except Exception as e:
     logger.critical(f"初始化 GenerativeModel 失敗: {e}")
     model = None
 
-# voice_clients = {} # 已移到上方
 
 db_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases")
 os.makedirs(db_base_path, exist_ok=True)
 
 def get_db_path(guild_id, db_type):
-    # ... (保持不變) ...
     if db_type == 'analytics':
         return os.path.join(db_base_path, f"analytics_server_{guild_id}.db")
     elif db_type == 'chat':
@@ -295,7 +233,6 @@ def get_db_path(guild_id, db_type):
         raise ValueError(f"Unknown database type: {db_type}")
 
 def init_db_for_guild(guild_id):
-    # ... (保持不變) ...
     logger.info(f"正在為伺服器 {guild_id} 初始化資料庫...")
     db_tables = {
         "users": "user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, message_count INTEGER DEFAULT 0",
@@ -341,7 +278,6 @@ def init_db_for_guild(guild_id):
 
 @tasks.loop(hours=24)
 async def send_daily_message():
-    # ... (保持不變) ...
     logger.info("開始執行每日訊息任務...")
     for idx, server_id in enumerate(servers):
         try:
@@ -379,7 +315,6 @@ async def send_daily_message():
 
 @send_daily_message.before_loop
 async def before_send_daily_message():
-    # ... (保持不變) ...
     await bot.wait_until_ready()
     now = datetime.now(pytz.timezone('Asia/Taipei'))
     next_run = now.replace(hour=9, minute=0, second=0)
@@ -392,7 +327,6 @@ async def before_send_daily_message():
 
 @bot.event
 async def on_ready():
-    # ... (大部分保持不變) ...
     logger.info(f"以 {bot.user.name} (ID: {bot.user.id}) 登入")
     logger.info(f"Discord.py 版本: {discord.__version__}")
     logger.info("機器人已準備就緒並連接到 Discord。")
@@ -400,19 +334,6 @@ async def on_ready():
     if model is None:
         logger.error("AI 模型初始化失敗。AI 回覆功能將被禁用。")
 
-    # --- discordspeechtotext 初始化 ---
-    # global whisper_model, vad_model # 範例
-    # try:
-    #     logger.info("正在載入 Whisper 模型...")
-    #     # whisper_model = load_model("base") # 選擇模型大小
-    #     logger.info("Whisper 模型載入完成。")
-    #     logger.info("正在載入 VAD 模型...")
-    #     # vad_model = VADDetector() # 根據函式庫初始化 VAD
-    #     logger.info("VAD 模型載入完成。")
-    # except Exception as e:
-    #     logger.critical(f"載入 STT 模型失敗: {e}")
-    #     # 可能需要禁用 STT 功能
-    # ---------------------------------
 
     guild_count = 0
     for guild in bot.guilds:
@@ -425,7 +346,7 @@ async def on_ready():
         synced_count = 0
         for guild in bot.guilds:
              try:
-                 synced = await bot.tree.sync()
+                 synced = await bot.tree.sync() # 全域同步
                  synced_count += len(synced)
                  logger.debug(f"已為伺服器 {guild.id} 同步 {len(synced)} 個命令。")
              except discord.errors.Forbidden:
@@ -452,7 +373,6 @@ async def on_ready():
 
 @bot.event
 async def on_guild_join(guild):
-    # ... (保持不變) ...
     logger.info(f"機器人加入新伺服器: {guild.name} (ID: {guild.id})")
     init_db_for_guild(guild.id)
     if guild.id not in servers:
@@ -460,6 +380,7 @@ async def on_guild_join(guild):
 
     logger.info(f"正在為新伺服器 {guild.id} 同步命令...")
     try:
+        # 為特定伺服器同步命令
         synced = await bot.tree.sync(guild=guild)
         logger.info(f"已為新伺服器 {guild.id} 同步 {len(synced)} 個命令。")
     except discord.errors.Forbidden:
@@ -485,7 +406,6 @@ async def on_guild_join(guild):
 
 @bot.event
 async def on_member_join(member):
-    # ... (保持不變) ...
     guild = member.guild
     logger.info(f"新成員加入: {member} (ID: {member.id}) 於伺服器 {guild.name} (ID: {guild.id})")
 
@@ -645,7 +565,6 @@ async def on_member_join(member):
 
 @bot.event
 async def on_member_remove(member):
-    # ... (保持不變) ...
     guild = member.guild
     logger.info(f"成員離開: {member} (ID: {member.id}) 從伺服器 {guild.name} (ID: {guild.id})")
 
@@ -784,7 +703,6 @@ async def on_member_remove(member):
     except Exception as e:
         logger.exception(f"Unexpected error during on_member_remove for {member.name} (ID: {member.id}) in guild {guild.id}: {e}")
 
-# --- STT 結果處理函數 handle_stt_result ---
 async def handle_stt_result(text: str, user: discord.Member, channel: discord.TextChannel):
     """
     處理來自新 STT (Whisper) 的辨識結果。
@@ -797,25 +715,24 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
     logger.info(f'已辨識文字:{user.display_name}說{text}')
     if not text:
         return
-    # *** 修正：添加 user 檢查 ***
     if user is None:
         logger.warning("[STT_Result] Received result with user=None, skipping.")
         return
 
     logger.info(f"[STT_Result] 來自 {user.display_name} (ID: {user.id}) 的辨識結果: '{text}'")
-    # 可以在這裡選擇性地將辨識結果發送到文字頻道
-    await channel.send(f"🔊 {user.display_name} 說：「{text}」")
+    try:
+        await channel.send(f"🔊 {user.display_name} 說：「{text}」")
+    except discord.HTTPException as e:
+        logger.error(f"[STT_Result] 發送辨識結果訊息失敗: {e}")
+        return # 無法發送訊息，後續處理可能也無意義
 
-    # 檢查啟動詞
     if STT_ACTIVATION_WORD.lower() not in text.lower():
         logger.debug(f"[STT_Result] 未偵測到啟動詞 '{STT_ACTIVATION_WORD}'。")
         return
 
-    # 提取啟動詞之後的查詢
     query = text.lower().split(STT_ACTIVATION_WORD.lower(), 1)[1].strip()
     if not query:
         logger.info("[STT_Result] 偵測到啟動詞，但查詢為空。")
-        # 找到對應的 voice_client 來播放 TTS
         vc = voice_clients.get(channel.guild.id)
         if vc and vc.is_connected():
             await play_tts(vc, "嗯？請問有什麼問題嗎？", context="STT Empty Query")
@@ -825,7 +742,6 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
     logger.info(f"[STT_Result] 偵測到啟動詞，查詢: '{query}'")
 
-    # --- AI 互動邏輯 (與之前類似) ---
     timestamp = get_current_time_utc8()
     initial_prompt = (
         f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。"
@@ -857,7 +773,6 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
     chat_db_path = get_db_path(channel.guild.id, 'chat')
 
     def get_chat_history():
-        # ... (保持不變) ...
         conn = None
         history = []
         try:
@@ -882,12 +797,10 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
         if not db_content:
             continue
         role = "model" if db_user == bot_name else "user"
-        # 加入說話者的名字到歷史紀錄中
-        # *** 修正：添加 user 檢查 ***
-        history_content = f"{user.display_name if user else '未知使用者'}: {db_content}" if role == "user" else db_content
+        # 歷史訊息格式調整為僅包含內容，避免混淆模型
+        history_content = db_content
         history.append({"role": role, "parts": [{"text": history_content}]})
 
-    # 找到對應的 voice_client
     vc = voice_clients.get(channel.guild.id)
     if not vc or not vc.is_connected():
          logger.error(f"[STT_Result] 無法處理 AI 請求，找不到連接的 VC (Guild: {channel.guild.id})")
@@ -901,20 +814,17 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
         try:
             chat = model.start_chat(history=history)
-            # 將當前語音查詢加入對話
-            # *** 修正：添加 user 檢查 ***
-            user_query_for_ai = f"{user.display_name if user else '未知使用者'}: {query}"
+            # 傳送給 AI 的訊息只包含當前查詢
+            user_query_for_ai = query
             response = await chat.send_message_async(
-                user_query_for_ai, # 使用包含用戶名的查詢
+                user_query_for_ai,
                 stream=False,
                 safety_settings=safety_settings
             )
             reply = response.text.strip() if response.candidates else "抱歉，我暫時無法回答。"
 
-            # 播放 TTS 回應
             await play_tts(vc, reply, context="STT AI Response")
-            # (可選) 將 AI 回應也發送到文字頻道
-            # await channel.send(f"🤖 {bot_name}: {reply}")
+            # 儲存訊息到資料庫
             def store_message(user_str, content_str, timestamp_str):
                 if not content_str: return
                 conn = None
@@ -922,16 +832,17 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
                     conn = sqlite3.connect(chat_db_path, timeout=10)
                     c = conn.cursor()
                     c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
-                    c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
+                    # 儲存時包含使用者名稱和時間戳
+                    db_content = f"{user_str} ({timestamp_str}): {content_str}"
+                    c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, db_content, timestamp_str))
                     c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
                     conn.commit()
                     logger.debug(f"Stored message from '{user_str}' in chat history for guild {channel.guild_id}")
-                except sqlite3.Error as e: logger.exception(f"DB error in store_message for guild {channel.uild_id}: {e}")
+                except sqlite3.Error as e: logger.exception(f"DB error in store_message for guild {channel.guild_id}: {e}")
                 finally:
                     if conn: conn.close()
-            # 儲存對話紀錄 (使用者查詢和 AI 回應)
-            # *** 修正：添加 user 檢查 ***
-            store_message(user.display_name if user else '未知使用者', query, timestamp) # 儲存原始查詢
+
+            store_message(user.display_name if user else '未知使用者', query, timestamp)
             if reply != "抱歉，我暫時無法回答。":
                 store_message(bot_name, reply, get_current_time_utc8())
 
@@ -939,10 +850,36 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
             logger.exception(f"[STT_Result] AI 互動或 TTS 播放時發生錯誤: {e}")
             await play_tts(vc, "抱歉，處理你的語音時發生了一些問題。", context="STT AI Error")
 
-# --- 新的音訊處理回調函數 ---
+
+# --- 新增：音訊重取樣函數 ---
+def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
+    """將 PCM 音訊數據從原始取樣率重取樣到目標取樣率"""
+    if original_sr == target_sr:
+        return pcm_data
+
+    try:
+        # 將 bytes 轉為 NumPy array (int16)
+        audio_np = np.frombuffer(pcm_data, dtype=np.int16)
+        # 轉為 float32 tensor
+        audio_tensor = torch.from_numpy(audio_np.astype(np.float32) / 32768.0).unsqueeze(0) # 添加 batch 維度
+
+        # 使用 torchaudio 進行重取樣
+        resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
+        resampled_tensor = resampler(audio_tensor)
+
+        # 轉回 int16 NumPy array
+        resampled_np = (resampled_tensor.squeeze(0).numpy() * 32768.0).astype(np.int16)
+        # 轉回 bytes
+        return resampled_np.tobytes()
+    except Exception as e:
+        logger.error(f"[Resample] 音訊重取樣失敗 from {original_sr} to {target_sr}: {e}")
+        return pcm_data # 出錯時返回原始數據
+
+
+# --- 修改：process_audio_chunk ---
 def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel):
     """
-    處理從 Discord 收到的音訊數據塊。
+    處理從 Discord 收到的音訊數據塊 (使用 Silero VAD)。
 
     Args:
         member (discord.Member): 說話的成員 (可能為 None)。
@@ -950,64 +887,82 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         guild_id (int): 伺服器 ID。
         channel (discord.TextChannel): 文字頻道。
     """
-    global vad_states, audio_buffers, vad_model
+    global audio_buffers, vad_model
 
-    if member is None:
-        # logger.warning(f"[AudioProc] Received audio data with member=None in guild {guild_id}, skipping.")
+    if member is None or member.bot:
+        return
+    if not vad_model:
+        logger.error("[VAD] VAD model not loaded. Cannot process audio chunk.")
         return
 
     user_id = member.id
     pcm_data = audio_data.pcm
+    original_sr = audio_data.sample_rate
 
     try:
-        is_speaking_now = np.abs(np.frombuffer(pcm_data, dtype=np.int16)).mean() > 500
+        # 1. 重取樣到 VAD 模型期望的取樣率 (16kHz)
+        resampled_pcm = resample_audio(pcm_data, original_sr, VAD_SAMPLE_RATE)
+        if not resampled_pcm:
+            return # 重取樣失敗
 
-        user_state = vad_states.setdefault(user_id, {'is_speaking': False, 'silence_frames': 0})
-        was_speaking = user_state['is_speaking']
+        # 2. 將 bytes 轉為 float32 tensor
+        audio_int16 = np.frombuffer(resampled_pcm, dtype=np.int16)
+        audio_float32 = torch.from_numpy(audio_int16.astype(np.float32) / 32768.0)
 
-        if is_speaking_now:
+        # 3. 使用 VAD 模型預測語音概率
+        # 注意：VAD 模型可能需要特定長度的輸入，這裡假設它可以處理任意長度
+        # 如果不行，需要將音訊分段處理
+        speech_prob = vad_model(audio_float32, VAD_SAMPLE_RATE).item()
+        is_speech_now = speech_prob >= VAD_THRESHOLD
+
+        # 4. 更新使用者狀態和緩衝區
+        user_state = audio_buffers[user_id]
+        current_time = time.time()
+
+        if is_speech_now:
+            # logger.debug(f"[VAD] Speech detected for {member.display_name} (Prob: {speech_prob:.2f})")
+            user_state['buffer'].extend(pcm_data) # 儲存原始取樣率的數據
+            user_state['last_speech_time'] = current_time
             user_state['is_speaking'] = True
-            user_state['silence_frames'] = 0
-            audio_buffers[user_id] += pcm_data
         else:
-            if was_speaking:
-                user_state['silence_frames'] += 1
-                if user_state['silence_frames'] > 50: # 1 秒靜音閾值
+            # logger.debug(f"[VAD] Silence detected for {member.display_name} (Prob: {speech_prob:.2f})")
+            if user_state['is_speaking']:
+                # 如果之前在說話，檢查靜音時長
+                silence_duration = (current_time - user_state['last_speech_time']) * 1000 # 毫秒
+                if silence_duration >= VAD_MIN_SILENCE_DURATION_MS:
+                    # 靜音時間足夠長，判斷為語句結束
+                    logger.info(f"[VAD] End of speech detected for {member.display_name} after {silence_duration:.0f}ms silence.")
                     user_state['is_speaking'] = False
-                    logger.info(f"[VAD] Detected end of speech for {member.display_name}")
-                    full_speech = audio_buffers.pop(user_id, b"")
-                    user_state['silence_frames'] = 0
+                    full_speech_buffer = user_state['buffer']
+                    user_state['buffer'] = bytearray() # 清空緩衝區
 
-                    if len(full_speech) > 48000 * 1 * 2 * 0.5:
-                        logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech)} bytes)")
-                        # *** 修正：使用 run_coroutine_threadsafe ***
-                        future = asyncio.run_coroutine_threadsafe(
-                            run_whisper_transcription(full_speech, member, channel),
-                            bot.loop # 傳入主事件循環
+                    # 觸發 Whisper 處理 (如果緩衝區有內容)
+                    if len(full_speech_buffer) > original_sr * 2 * 0.2: # 至少 0.2 秒的音訊
+                        logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes)")
+                        # 使用 create_task 在事件循環中執行協程
+                        asyncio.create_task(
+                            run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
                         )
-                        try:
-                            # 短暫等待以捕捉立即的錯誤，但不要阻塞回調線程
-                            future.result(timeout=0.1)
-                        except asyncio.TimeoutError:
-                            pass # 任務已成功提交
-                        except Exception as e:
-                            logger.error(f"[AudioProc] Error submitting whisper task for {member.display_name}: {e}")
                     else:
-                        logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech)} bytes), skipping Whisper.")
+                         logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
+                else:
+                    # 靜音時間不夠長，繼續緩衝
+                    user_state['buffer'].extend(pcm_data)
+            # else: 如果之前就是靜音，則忽略此靜音塊 (不緩衝)
 
     except Exception as e:
         logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
-        if user_id in vad_states: del vad_states[user_id]
-        if user_id in audio_buffers: del audio_buffers[user_id]
+        if user_id in audio_buffers: del audio_buffers[user_id] # 清理出錯使用者的狀態
 
 
-# --- 新的 Whisper 辨識任務 ---
-async def run_whisper_transcription(audio_bytes: bytes, member: discord.Member, channel: discord.TextChannel):
+# --- 修改：run_whisper_transcription ---
+async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member: discord.Member, channel: discord.TextChannel):
     """
     在背景執行 Whisper 辨識。
 
     Args:
-        audio_bytes (bytes): 完整的 PCM 語音片段 (int16, 48kHz, mono)。
+        audio_bytes (bytes): 完整的 PCM 語音片段 (int16)。
+        sample_rate (int): 音訊的取樣率。
         member (discord.Member): 說話的使用者 (可能為 None)。
         channel (discord.TextChannel): 文字頻道。
     """
@@ -1017,23 +972,30 @@ async def run_whisper_transcription(audio_bytes: bytes, member: discord.Member, 
         return
     if not whisper_model:
          logger.error("[Whisper] Whisper model not loaded. Cannot transcribe.")
+         # 可以在這裡嘗試發送錯誤訊息給使用者或頻道
+         # await channel.send(f"抱歉 {member.mention}，語音辨識模型未載入，無法處理您的語音。")
          return
 
     try:
         start_time = time.time()
-        logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes 音訊...")
+        logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes 音訊 (SR: {sample_rate})...")
 
+        # 1. 將 bytes 轉為 NumPy array (int16)
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+        # 2. 轉為 float32，Whisper 模型需要這個格式
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
+        # 3. 在 executor 中執行耗時的 transcribe 操作
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None,
+            None, # 使用默認的 ThreadPoolExecutor
             functools.partial(
                 whisper_model.transcribe,
                 audio_float32,
                 language=STT_LANGUAGE,
-                fp16=torch.cuda.is_available()
+                fp16=torch.cuda.is_available(), # 如果有 GPU，使用 fp16 加速
+                # initial_prompt="...", # 可以提供一些提示詞
+                # temperature=0.0 # 控制隨機性
             )
         )
         text = result.get("text", "").strip()
@@ -1041,10 +1003,16 @@ async def run_whisper_transcription(audio_bytes: bytes, member: discord.Member, 
         duration = time.time() - start_time
         logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s。結果: '{text}'")
 
+        # 4. 將結果傳遞給處理函數
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
         logger.exception(f"[Whisper] 處理來自 {member.display_name} 的音訊時發生錯誤: {e}")
+        # 可以考慮在這裡發送錯誤訊息
+        # try:
+        #     await channel.send(f"抱歉 {member.mention}，處理您的語音時發生錯誤。")
+        # except discord.HTTPException:
+        #     pass
 
 
 @bot.tree.command(name='join')
@@ -1058,61 +1026,92 @@ async def join(interaction: discord.Interaction):
     channel = interaction.user.voice.channel
     guild_id = interaction.guild.id
 
+    # --- 清理舊狀態 ---
+    def clear_guild_stt_state(gid):
+        if gid in listening_guilds:
+            del listening_guilds[gid]
+        # 清理該伺服器所有使用者的緩衝區
+        users_to_clear = [uid for uid, state in audio_buffers.items() if bot.get_guild(gid) and bot.get_guild(gid).get_member(uid)]
+        for uid in users_to_clear:
+            if uid in audio_buffers:
+                del audio_buffers[uid]
+        logger.debug(f"已清理伺服器 {gid} 的 STT 狀態和緩衝區。")
+
+    # 如果機器人已在其他頻道或未監聽，先處理舊連接
     if guild_id in voice_clients and voice_clients[guild_id].is_connected():
-         vc = voice_clients[guild_id]
-         if not vc.is_listening():
-             logger.info(f"機器人已在頻道 {vc.channel.name} 但未監聽，重新啟動監聽...")
-             try:
-                 if guild_id in listening_guilds: del listening_guilds[guild_id]
-                 for user_id in list(vad_states.keys()):
-                     member = interaction.guild.get_member(user_id)
-                     if member and member.guild.id == guild_id:
-                         del vad_states[user_id]
-                 for user_id in list(audio_buffers.keys()):
-                     member = interaction.guild.get_member(user_id)
-                     if member and member.guild.id == guild_id:
-                         del audio_buffers[user_id]
+        vc = voice_clients[guild_id]
+        if vc.channel != channel:
+            logger.info(f"機器人已在頻道 {vc.channel.name}，將移動至 {channel.name}...")
+            try:
+                if vc.is_listening():
+                    vc.stop_listening()
+                await vc.move_to(channel)
+                clear_guild_stt_state(guild_id) # 清理舊狀態
+                voice_clients[guild_id] = vc # 更新 voice_clients 中的 vc 實例 (move_to 可能會改變)
+                logger.info(f"已成功移動至頻道 {channel.name}")
+            except Exception as e:
+                logger.exception(f"移動語音頻道失敗: {e}")
+                await interaction.response.send_message("❌ 移動語音頻道失敗。", ephemeral=True)
+                return
+        elif not vc.is_listening():
+             logger.info(f"機器人已在頻道 {channel.name} 但未監聽，將重新啟動監聽...")
+             clear_guild_stt_state(guild_id) # 清理舊狀態
+             # 不需要重新 connect 或 move，直接啟動監聽
+        else: # 已在正確頻道且正在監聽
+             await interaction.response.send_message("⚠️ 我已經在語音頻道中並且正在監聽。", ephemeral=True)
+             return
+    else: # 機器人未連接或連接已斷開
+        logger.info(f"收到來自 {interaction.user.name} 的加入請求 (頻道: {channel.name}, 伺服器: {guild_id})")
+        if guild_id in voice_clients: del voice_clients[guild_id] # 移除舊的無效條目
+        clear_guild_stt_state(guild_id) # 清理可能殘留的狀態
+        try:
+            # 連接新的語音頻道
+            vc = await channel.connect(cls=voice_recv.VoiceRecvClient, reconnect=True, timeout=60.0)
+            voice_clients[guild_id] = vc
+            logger.info(f"成功加入語音頻道: {channel.name} (伺服器: {guild_id})")
+        except discord.ClientException as e:
+            logger.error(f"加入語音頻道失敗: {e}")
+            await interaction.response.send_message(f"❌ 加入語音頻道失敗: {e}", ephemeral=True)
+            if guild_id in voice_clients: del voice_clients[guild_id]
+            clear_guild_stt_state(guild_id)
+            return
+        except asyncio.TimeoutError:
+             logger.error(f"加入語音頻道超時 (伺服器: {guild_id})")
+             await interaction.response.send_message("❌ 加入語音頻道超時。", ephemeral=True)
+             if guild_id in voice_clients: del voice_clients[guild_id]
+             clear_guild_stt_state(guild_id)
+             return
+        except Exception as e:
+             logger.exception(f"加入語音頻道時發生未知錯誤: {e}")
+             await interaction.response.send_message("❌ 加入語音頻道時發生未知錯誤。", ephemeral=True)
+             if guild_id in voice_clients: del voice_clients[guild_id]
+             clear_guild_stt_state(guild_id)
+             return
 
-                 callback = functools.partial(process_audio_chunk, guild_id=guild_id, channel=interaction.channel)
-                 sink = BasicSink(callback)
-                 vc.listen(sink)
-                 listening_guilds[guild_id] = vc
-                 await interaction.response.send_message(f"✅ 已在 <#{channel.id}> 重新開始監聽！", ephemeral=True)
-                 return
-             except Exception as e:
-                  logger.exception(f"重新啟動監聽失敗 (伺服器: {guild_id}): {e}")
-                  await interaction.response.send_message("❌ 重新啟動監聽失敗。", ephemeral=True)
-                  return
-         else:
-              await interaction.response.send_message("⚠️ 我已經在語音頻道中並且正在監聽。", ephemeral=True)
-              return
-
-    logger.info(f"收到來自 {interaction.user.name} 的加入請求 (頻道: {channel.name}, 伺服器: {guild_id})")
-
-    try:
-        vc = await channel.connect(cls=voice_recv.VoiceRecvClient, reconnect=True)
-        voice_clients[guild_id] = vc
-        logger.info(f"成功加入語音頻道: {channel.name} (伺服器: {guild_id})")
-    except discord.ClientException as e:
-        logger.error(f"加入語音頻道失敗: {e}")
-        await interaction.response.send_message(f"❌ 加入語音頻道失敗: {e}", ephemeral=True)
+    # --- 啟動監聽 ---
+    vc = voice_clients[guild_id] # 確保使用最新的 vc 實例
+    if not vc or not vc.is_connected():
+        logger.error(f"嘗試啟動監聽時，VC 無效或未連接 (伺服器: {guild_id})")
+        await interaction.response.send_message("❌ 啟動監聽失敗，語音連接無效。", ephemeral=True)
+        if guild_id in voice_clients: del voice_clients[guild_id]
+        clear_guild_stt_state(guild_id)
         return
-    except asyncio.TimeoutError:
-         logger.error(f"加入語音頻道超時 (伺服器: {guild_id})")
-         await interaction.response.send_message("❌ 加入語音頻道超時。", ephemeral=True)
-         return
 
+    # 創建 Sink 回調
+    # 使用 functools.partial 傳遞額外參數
     callback = functools.partial(process_audio_chunk, guild_id=guild_id, channel=interaction.channel)
     sink = BasicSink(callback)
 
     try:
         vc.listen(sink)
-        listening_guilds[guild_id] = vc
+        listening_guilds[guild_id] = vc # 標記為正在監聽
         logger.info(f"已開始在頻道 {channel.name} 監聽 (伺服器: {guild_id})")
-        await interaction.response.send_message(f"✅ 已加入 <#{channel.id}> 並開始監聽！", ephemeral=True)
+        # 使用 followup 發送成功訊息，因為可能已經 defer 或回應過
+        await interaction.followup.send(f"✅ 已在 <#{channel.id}> 開始監聽！", ephemeral=True)
     except Exception as e:
          logger.exception(f"啟動監聽失敗 (伺服器: {guild_id}): {e}")
-         await interaction.response.send_message("❌ 啟動監聽失敗。", ephemeral=True)
+         await interaction.followup.send("❌ 啟動監聽失敗。", ephemeral=True)
+         # 嘗試斷開連接並清理狀態
          if guild_id in voice_clients:
              try:
                  await voice_clients[guild_id].disconnect()
@@ -1120,8 +1119,7 @@ async def join(interaction: discord.Interaction):
                  logger.error(f"啟動監聽失敗後斷開連接時出錯: {disconnect_err}")
              finally:
                  del voice_clients[guild_id]
-         if guild_id in listening_guilds:
-             del listening_guilds[guild_id]
+         clear_guild_stt_state(guild_id)
 
 
 @bot.tree.command(name='leave')
@@ -1131,42 +1129,43 @@ async def leave(interaction: discord.Interaction):
     gid = interaction.guild.id
     logger.info(f"收到來自 {interaction.user.name} 的離開請求 (伺服器: {gid})")
 
-    vc = voice_clients.pop(gid, None)
-    listening_vc = listening_guilds.pop(gid, None)
+    vc = voice_clients.pop(gid, None) # 從 voice_clients 移除
+    listening_vc = listening_guilds.pop(gid, None) # 從 listening_guilds 移除
 
+    # --- 清理狀態 ---
+    # 清理該伺服器所有使用者的緩衝區
     guild = interaction.guild
     if guild:
-        for user_id in list(vad_states.keys()):
-            member = guild.get_member(user_id)
-            if member and member.guild.id == gid:
-                del vad_states[user_id]
-        for user_id in list(audio_buffers.keys()):
-            member = guild.get_member(user_id)
-            if member and member.guild.id == gid:
-                del audio_buffers[user_id]
-        logger.debug(f"已清理伺服器 {gid} 的 VAD 狀態和緩衝區。")
+        users_to_clear = [uid for uid, state in audio_buffers.items() if guild.get_member(uid)]
+        for uid in users_to_clear:
+            if uid in audio_buffers:
+                del audio_buffers[uid]
+        logger.debug(f"已清理伺服器 {gid} 的 STT 狀態和緩衝區 (Leave)。")
     else:
         logger.warning(f"無法獲取伺服器 {gid} 對象以清理狀態。")
+    # --- 斷開連接 ---
+    active_vc = vc or listening_vc # 可能在 listening_guilds 但不在 voice_clients
 
-
-    if vc and vc.is_connected():
+    if active_vc and active_vc.is_connected():
         try:
-            if vc.is_listening():
-                vc.stop_listening()
+            if active_vc.is_listening():
+                active_vc.stop_listening()
                 logger.info(f"已停止監聽 (伺服器: {gid})")
-            await vc.disconnect()
+            await active_vc.disconnect()
             logger.info(f"已斷開語音連接 (伺服器: {gid})")
             await interaction.response.send_message("👋 已停止監聽並離開語音頻道。", ephemeral=True)
         except Exception as e:
             logger.exception(f"離開語音頻道時發生錯誤 (伺服器: {gid}): {e}")
             await interaction.response.send_message("❌ 離開時發生錯誤。", ephemeral=True)
-            # 保留清理 voice_clients 和 listening_guilds 的邏輯
-            if gid in voice_clients: del voice_clients[gid] # 確保即使出錯也清理
+            # 確保殘留狀態被清理
+            if gid in voice_clients: del voice_clients[gid]
             if gid in listening_guilds: del listening_guilds[gid]
     else:
         logger.info(f"機器人未連接到語音頻道 (伺服器: {gid})")
         await interaction.response.send_message("⚠️ 我目前不在任何語音頻道中。", ephemeral=True)
+        # 確保殘留狀態被清理
         if gid in listening_guilds: del listening_guilds[gid]
+        if gid in voice_clients: del voice_clients[gid]
 
 
 @bot.tree.command(name='stop_listening', description="讓機器人停止監聽語音 (但保持在頻道中)")
@@ -1177,91 +1176,97 @@ async def stop_listening(interaction: discord.Interaction):
     guild_id = guild.id
     logger.info(f"使用者 {interaction.user.id} 請求停止監聽 (伺服器 {guild_id})")
 
-    if guild_id in listening_guilds:
-        vc = listening_guilds[guild_id]
-        if vc.is_connected() and vc.is_listening():
-            try:
-                vc.stop_listening()
-                del listening_guilds[guild_id]
+    vc = voice_clients.get(guild_id) # 主要從 voice_clients 獲取
 
-                for user_id in list(vad_states.keys()):
-                    member = interaction.guild.get_member(user_id)
-                    if member and member.guild.id == guild_id:
-                        del vad_states[user_id]
-                for user_id in list(audio_buffers.keys()):
-                     member = interaction.guild.get_member(user_id)
-                     if member and member.guild.id == guild_id:
-                         del audio_buffers[user_id]
-                logger.debug(f"已清理伺服器 {guild_id} 的 VAD 狀態和緩衝區 (停止監聽)。")
+    if guild_id in listening_guilds:
+        listening_vc = listening_guilds.pop(guild_id) # 從監聽列表移除
+        if listening_vc and listening_vc.is_connected() and listening_vc.is_listening():
+            try:
+                listening_vc.stop_listening()
+                # 清理該伺服器所有使用者的緩衝區
+                users_to_clear = [uid for uid, state in audio_buffers.items() if guild.get_member(uid)]
+                for uid in users_to_clear:
+                    if uid in audio_buffers:
+                        del audio_buffers[uid]
+                logger.debug(f"已清理伺服器 {guild_id} 的 STT 狀態和緩衝區 (停止監聽)。")
 
                 logger.info(f"[STT] 已透過指令停止監聽 (伺服器 {guild_id})")
                 await interaction.response.send_message("好的，我已經停止聆聽了。", ephemeral=True)
             except Exception as e:
                  logger.error(f"[STT] 透過指令停止監聽時發生錯誤: {e}")
                  await interaction.response.send_message("嘗試停止聆聽時發生錯誤。", ephemeral=True)
-        elif vc.is_connected() and not vc.is_listening():
-             logger.info(f"[STT] 機器人已連接但未在監聽 (伺服器 {guild_id})")
-             if guild_id in listening_guilds: del listening_guilds[guild_id]
+                 listening_guilds[guild_id] = listening_vc # 出錯時恢復標記
+        elif listening_vc and listening_vc.is_connected() and not listening_vc.is_listening():
+             logger.info(f"[STT] 機器人已連接但未在監聽 (伺服器 {guild_id}) - listening_guilds 狀態不一致")
              await interaction.response.send_message("我目前沒有在聆聽喔。", ephemeral=True)
         else:
             logger.warning(f"[STT] 發現已斷開連接的 VC 的監聽條目 (伺服器 {guild_id})。已移除條目。")
-            del listening_guilds[guild_id]
             await interaction.response.send_message("我似乎已經不在語音頻道了，無法停止聆聽。", ephemeral=True)
+    elif vc and vc.is_connected() and vc.is_listening():
+         # listening_guilds 沒有，但 vc 實際上在監聽 (狀態不一致)
+         logger.warning(f"[STT] 監聽狀態不同步，嘗試停止監聽 (伺服器: {guild_id})")
+         try:
+             vc.stop_listening()
+             # 清理緩衝區
+             users_to_clear = [uid for uid, state in audio_buffers.items() if guild.get_member(uid)]
+             for uid in users_to_clear:
+                 if uid in audio_buffers:
+                     del audio_buffers[uid]
+             logger.debug(f"已清理伺服器 {guild_id} 的 STT 狀態和緩衝區 (停止監聽 - 狀態修正)。")
+             await interaction.response.send_message("好的，我已經停止聆聽了 (狀態已修正)。", ephemeral=True)
+         except Exception as e:
+              logger.error(f"[STT] 修正監聽狀態時停止失敗: {e}")
+              await interaction.response.send_message("嘗試停止聆聽時發生錯誤 (狀態修正失敗)。", ephemeral=True)
     else:
-        logger.info(f"[STT] 機器人未在監聽 (伺服器 {guild_id})")
-        vc = voice_clients.get(guild_id)
-        if vc and vc.is_connected() and vc.is_listening():
-             logger.warning(f"[STT] 監聽狀態不同步，嘗試停止監聽 (伺服器: {guild_id})")
-             try:
-                 vc.stop_listening()
-                 for user_id in list(vad_states.keys()):
-                     member = interaction.guild.get_member(user_id)
-                     if member and member.guild.id == guild_id: del vad_states[user_id]
-                 for user_id in list(audio_buffers.keys()):
-                     member = interaction.guild.get_member(user_id)
-                     if member and member.guild.id == guild_id: del audio_buffers[user_id]
-
-                 await interaction.response.send_message("好的，我已經停止聆聽了 (狀態已修正)。", ephemeral=True)
-             except Exception as e:
-                  logger.error(f"[STT] 修正監聽狀態時停止失敗: {e}")
-                  await interaction.response.send_message("嘗試停止聆聽時發生錯誤 (狀態修正失敗)。", ephemeral=True)
-        else:
-             await interaction.response.send_message("我目前沒有在聆聽喔。", ephemeral=True)
+        # listening_guilds 沒有，vc 也沒在監聽或未連接
+        logger.info(f"[STT] 機器人未在監聽或未連接 (伺服器 {guild_id})")
+        await interaction.response.send_message("我目前沒有在聆聽喔。", ephemeral=True)
 
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    # ... (大部分保持不變，但自動離開邏輯需要檢查 listening_guilds) ...
-    if member.id == bot.user.id: return
-    if member.bot: return
+    if member.bot: return # 忽略機器人自身的狀態更新以及其他機器人
 
     guild = member.guild
     guild_id = guild.id
+    user_id = member.id
 
     bot_voice_client = voice_clients.get(guild_id)
+
+    # --- 清理使用者狀態 ---
+    def clear_user_stt_state(uid, gid):
+        if uid in audio_buffers:
+            del audio_buffers[uid]
+            logger.debug(f"已清理離開者 {uid} (伺服器 {gid}) 的音訊緩衝區。")
+
+    # --- 處理機器人未連接或使用者與機器人無關的情況 ---
     if not bot_voice_client or not bot_voice_client.is_connected():
+        # 如果機器人不在語音頻道，但使用者離開了某個頻道，清理該使用者的狀態 (以防萬一)
+        if before.channel and after.channel != before.channel:
+             clear_user_stt_state(user_id, guild_id)
+        # 清理可能殘留的監聽標記
         if guild_id in listening_guilds:
-            logger.warning(f"[VC_State] 清理殘留的監聽標記 (伺服器: {guild_id})")
+            logger.warning(f"[VC_State] 清理殘留的監聽標記 (機器人未連接) (伺服器: {guild_id})")
             del listening_guilds[guild_id]
-        for user_id in list(vad_states.keys()):
-            m = guild.get_member(user_id)
-            if m and m.guild.id == guild_id: del vad_states[user_id]
-        for user_id in list(audio_buffers.keys()):
-             m = guild.get_member(user_id)
-             if m and m.guild.id == guild_id: del audio_buffers[user_id]
-        return
+        return # 機器人不在語音中，無需處理後續邏輯
 
     bot_channel = bot_voice_client.channel
 
-    if before.channel != bot_channel and after.channel == bot_channel:
+    # --- 處理使用者加入/離開機器人所在頻道 ---
+    user_joined_bot_channel = before.channel != bot_channel and after.channel == bot_channel
+    user_left_bot_channel = before.channel == bot_channel and after.channel != bot_channel
+
+    if user_joined_bot_channel:
         user_name = member.display_name
-        logger.info(f"使用者 '{user_name}' (ID: {member.id}) 加入了機器人所在的頻道 '{bot_channel.name}' (ID: {bot_channel.id}) (伺服器 {guild_id})")
-        human_members_already_in = [m for m in bot_channel.members if not m.bot and m.id != member.id]
+        logger.info(f"使用者 '{user_name}' (ID: {user_id}) 加入了機器人所在的頻道 '{bot_channel.name}' (ID: {bot_channel.id}) (伺服器 {guild_id})")
+        # 檢查頻道內是否已有其他真人使用者 (排除剛加入的這位)
+        human_members_already_in = [m for m in bot_channel.members if not m.bot and m.id != user_id]
         if len(human_members_already_in) > 0:
             tts_message = f"{user_name} 加入了語音頻道"
             logger.info(f"準備為 {user_name} 播放加入提示音 (伺服器 {guild_id})")
             try:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.5) # 稍微延遲以避免與 Discord 加入音效重疊
+                # 使用 create_task 避免阻塞
                 asyncio.create_task(play_tts(bot_voice_client, tts_message, context="User Join Notification"))
                 logger.debug(f"已為 {user_name} 創建加入提示音任務。")
             except Exception as e:
@@ -1269,20 +1274,14 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         else:
             logger.info(f"頻道內無其他使用者，跳過為 {user_name} 播放加入提示音。")
 
-    elif before.channel == bot_channel and after.channel != bot_channel:
+    elif user_left_bot_channel:
         user_name = member.display_name
-        user_id = member.id
         logger.info(f"使用者 '{user_name}' (ID: {user_id}) 離開了機器人所在的頻道 '{bot_channel.name}' (ID: {bot_channel.id}) (伺服器 {guild_id})")
+        clear_user_stt_state(user_id, guild_id) # 清理離開者的狀態
 
-        if user_id in vad_states:
-            del vad_states[user_id]
-            logger.debug(f"已清理離開者 {user_name} 的 VAD 狀態。")
-        if user_id in audio_buffers:
-            del audio_buffers[user_id]
-            logger.debug(f"已清理離開者 {user_name} 的音訊緩衝區。")
-
-        if bot.user in before.channel.members:
-             human_members_left = [m for m in before.channel.members if not m.bot and m.id != member.id]
+        # 檢查機器人是否仍在原頻道，以及頻道內是否還有其他真人使用者
+        if bot.user in before.channel.members: # 確保機器人還在使用者離開的那個頻道
+             human_members_left = [m for m in before.channel.members if not m.bot] # 檢查離開後是否還有真人
              if len(human_members_left) > 0:
                  tts_message = f"{user_name} 離開了語音頻道"
                  logger.info(f"準備為 {user_name} 播放離開提示音 (伺服器 {guild_id})")
@@ -1297,59 +1296,62 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         else:
              logger.info(f"機器人已不在頻道 {before.channel.name}，跳過為 {user_name} 播放離開提示音。")
 
-    if bot_voice_client and bot_voice_client.is_connected():
-        user_left_bot_channel = (before.channel == bot_channel and after.channel != bot_channel)
-        bot_moved_from_empty = (before.channel and after.channel == bot_channel and before.channel.members == [bot.user])
+    # --- 處理自動離開 ---
+    # 檢查條件：使用者離開了機器人頻道，或者使用者從其他頻道移動到了只剩機器人的頻道
+    should_check_auto_leave = user_left_bot_channel or \
+                              (before.channel != bot_channel and after.channel == bot_channel and len([m for m in before.channel.members if not m.bot]) == 0)
 
-        if user_left_bot_channel or bot_moved_from_empty:
-            await asyncio.sleep(1.5)
+    if bot_voice_client and bot_voice_client.is_connected() and should_check_auto_leave:
+        # 稍微延遲檢查，給予 Discord API 更新成員列表的時間
+        await asyncio.sleep(1.5)
 
-            current_vc = voice_clients.get(guild_id)
-            if not current_vc or not current_vc.is_connected():
-                logger.debug(f"[AutoLeave] 機器人已斷開連接，取消自動離開檢查 (伺服器: {guild_id})")
-                if guild_id in listening_guilds: del listening_guilds[guild_id]
-                for user_id in list(vad_states.keys()):
-                    m = guild.get_member(user_id)
-                    if m and m.guild.id == guild_id: del vad_states[user_id]
-                for user_id in list(audio_buffers.keys()):
-                    m = guild.get_member(user_id)
-                    if m and m.guild.id == guild_id: del audio_buffers[user_id]
-                return
+        # 重新獲取最新的 VC 狀態，因為可能在延遲期間發生變化
+        current_vc = voice_clients.get(guild_id)
+        if not current_vc or not current_vc.is_connected():
+            logger.debug(f"[AutoLeave] 機器人已斷開連接，取消自動離開檢查 (伺服器: {guild_id})")
+            # 清理可能殘留的狀態
+            if guild_id in listening_guilds: del listening_guilds[guild_id]
+            clear_user_stt_state(user_id, guild_id) # 清理觸發檢查的使用者狀態
+            return
 
-            current_channel = current_vc.channel
-            if current_channel:
-                current_members = current_channel.members
-                human_members = [m for m in current_members if not m.bot]
+        current_channel = current_vc.channel
+        if current_channel:
+            # 再次檢查頻道內是否還有真人使用者
+            human_members = [m for m in current_channel.members if not m.bot]
 
-                if not human_members:
-                    logger.info(f"頻道 '{current_channel.name}' 只剩下 Bot 或空無一人，自動離開。 (伺服器: {guild_id})")
+            if not human_members:
+                logger.info(f"頻道 '{current_channel.name}' 只剩下 Bot 或空無一人，自動離開。 (伺服器: {guild_id})")
 
-                    if guild_id in listening_guilds:
-                        try:
-                            if current_vc.is_listening():
-                                current_vc.stop_listening()
-                            del listening_guilds[guild_id]
-                            logger.info(f"[STT] 因自動離開停止監聽 (伺服器 {guild_id})")
-                        except Exception as e:
-                            logger.error(f"[STT] 自動離開時停止監聽失敗: {e}")
+                # --- 清理狀態並斷開連接 ---
+                listening_vc = listening_guilds.pop(guild_id, None)
+                if listening_vc and listening_vc.is_listening():
+                    try:
+                        listening_vc.stop_listening()
+                        logger.info(f"[STT] 因自動離開停止監聽 (伺服器 {guild_id})")
+                    except Exception as e:
+                        logger.error(f"[STT] 自動離開時停止監聽失敗: {e}")
 
-                    for user_id in list(vad_states.keys()):
-                         m = guild.get_member(user_id)
-                         if m and m.guild.id == guild_id: del vad_states[user_id]
-                    for user_id in list(audio_buffers.keys()):
-                         m = guild.get_member(user_id)
-                         if m and m.guild.id == guild_id: del audio_buffers[user_id]
-                    logger.debug(f"已清理伺服器 {guild_id} 的 VAD 狀態和緩衝區 (自動離開)。")
+                # 清理該伺服器所有使用者的緩衝區
+                users_to_clear = [uid for uid, state in audio_buffers.items() if guild.get_member(uid)]
+                for uid in users_to_clear:
+                    if uid in audio_buffers:
+                        del audio_buffers[uid]
+                logger.debug(f"已清理伺服器 {guild_id} 的 STT 狀態和緩衝區 (自動離開)。")
 
+                # 斷開連接
+                try:
                     await current_vc.disconnect()
+                    logger.info(f"已自動離開頻道 '{current_channel.name}' (伺服器: {guild_id})")
+                except Exception as e:
+                    logger.exception(f"自動離開時斷開連接失敗: {e}")
+                finally:
+                    # 確保從 voice_clients 移除
                     if guild_id in voice_clients:
                         del voice_clients[guild_id]
-                    logger.info(f"已自動離開頻道 '{current_channel.name}' (伺服器: {guild_id})")
 
 
 @bot.event
 async def on_message(message: discord.Message):
-    # ... (保持不變) ...
     if message.author == bot.user: return
     if not message.guild: return
     if message.author.bot: return
@@ -1417,6 +1419,7 @@ async def on_message(message: discord.Message):
             conn = sqlite3.connect(chat_db_path, timeout=10)
             c = conn.cursor()
             c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
+            # 儲存原始訊息內容，不加前綴
             c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
             c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
             conn.commit()
@@ -1432,6 +1435,7 @@ async def on_message(message: discord.Message):
             conn = sqlite3.connect(chat_db_path, timeout=10)
             c = conn.cursor()
             c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
+            # 讀取時也不需要解析前綴，直接用 user 欄位判斷角色
             c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
             rows = c.fetchall()
             history = rows
@@ -1531,9 +1535,15 @@ async def on_message(message: discord.Message):
     elif isinstance(cfg_target_channels, (str, int)):
         target_channel_ids_str = [str(cfg_target_channels)]
     elif isinstance(cfg_target_channels, dict):
-        target_channel_ids_str = [str(cid) for cid in cfg_target_channels.get(str(guild_id), [])]
-        if not target_channel_ids_str:
-             target_channel_ids_str = [str(cid) for cid in cfg_target_channels.get(int(guild_id), [])]
+        # 嘗試從字典中獲取當前伺服器的設定
+        server_channels = cfg_target_channels.get(str(guild_id), cfg_target_channels.get(int(guild_id)))
+        if server_channels:
+            if isinstance(server_channels, (list, tuple)):
+                 target_channel_ids_str = [str(cid) for cid in server_channels]
+            elif isinstance(server_channels, (str, int)):
+                 target_channel_ids_str = [str(server_channels)]
+            else:
+                 logger.warning(f"Invalid format for TARGET_CHANNEL_ID entry for guild {guild_id}: {server_channels}")
 
     if bot.user.mentioned_in(message) and not message.mention_everyone:
         should_respond = True
@@ -1607,7 +1617,9 @@ async def on_message(message: discord.Message):
                 for row in chat_history_raw:
                     db_user, db_content, db_timestamp = row
                     if db_content:
+                        # 根據資料庫中的 'user' 欄位判斷角色
                         role = "user" if db_user != bot_name else "model"
+                        # 直接使用資料庫中的 'content' 作為訊息文本
                         message_text = db_content
                         chat_history_processed.append({"role": role, "parts": [{"text": message_text}]})
                     else:
@@ -1630,6 +1642,7 @@ async def on_message(message: discord.Message):
                      return
 
                 chat = model.start_chat(history=chat_history_processed)
+                # 傳送給 AI 的訊息只包含使用者當前的輸入
                 current_user_message_formatted = message.content
 
                 api_response_text = ""
@@ -1639,12 +1652,7 @@ async def on_message(message: discord.Message):
                     response = await chat.send_message_async(
                         current_user_message_formatted,
                         stream=False,
-                        safety_settings={
-                            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-                        },
+                        safety_settings=safety_settings # 使用定義好的 safety_settings
                     )
 
                     if response.prompt_feedback and response.prompt_feedback.block_reason:
@@ -1657,6 +1665,7 @@ async def on_message(message: discord.Message):
                         finish_reason = 'UNKNOWN'
                         safety_ratings = 'N/A'
                         try:
+                            # 嘗試獲取更詳細的結束原因和安全評級
                             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                                 finish_reason = getattr(response.prompt_feedback, 'block_reason', 'NO_CANDIDATES')
                                 if hasattr(response.prompt_feedback, 'safety_ratings'):
@@ -1681,22 +1690,27 @@ async def on_message(message: discord.Message):
                     logger.info(f"收到 Gemini API 回應 (伺服器 {guild_id}, 使用者 {user_id})。長度: {len(api_response_text)}")
                     if debug: logger.debug(f"Gemini 回應文本 (前 200 字元): {api_response_text[:200]}...")
 
+                    # --- 處理 Token 計數 ---
                     try:
+                        # 優先嘗試從 usage_metadata 獲取
                         usage_metadata = getattr(response, 'usage_metadata', None)
                         if usage_metadata:
                             prompt_token_count = getattr(usage_metadata, 'prompt_token_count', 0)
                             candidates_token_count = getattr(usage_metadata, 'candidates_token_count', 0)
                             total_token_count = getattr(usage_metadata, 'total_token_count', None)
+                            # 如果 total_token_count 不存在，則手動計算
                             if total_token_count is None:
                                 total_token_count = prompt_token_count + candidates_token_count
                             logger.info(f"Token 使用量 (伺服器 {guild_id}): 提示={prompt_token_count}, 回應={candidates_token_count}, 總計={total_token_count}")
                         else:
+                            # 備用方案：嘗試從 candidate 獲取 (可能不準確或不存在)
                             if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
                                 total_token_count = response.candidates[0].token_count
                                 logger.info(f"從候選者獲取的總 Token 數 (備用, 伺服器 {guild_id}): {total_token_count}")
                             else:
                                 logger.warning(f"無法在 API 回應中找到 Token 計數 (伺服器 {guild_id})。")
 
+                        # 更新資料庫
                         if total_token_count is not None and total_token_count > 0:
                             update_token_in_db(total_token_count, str(user_id), str(channel.id))
                         else:
@@ -1707,50 +1721,60 @@ async def on_message(message: discord.Message):
                     except Exception as token_error:
                         logger.exception(f"處理 Token 計數時發生錯誤 (伺服器 {guild_id}): {token_error}")
 
+                    # --- 儲存對話紀錄 ---
                     store_message(user_name, message.content, current_timestamp_utc8)
                     if api_response_text:
                         store_message(bot_name, api_response_text, get_current_time_utc8())
 
+                    # --- 發送回覆 ---
                     if api_response_text:
+                        # 處理長訊息分割
                         if len(api_response_text) > 2000:
                             logger.warning(f"API 回覆超過 2000 字元 ({len(api_response_text)}) (伺服器 {guild_id})。正在分割...")
                             parts = []
                             current_part = ""
+                            # 按換行符分割，並確保每部分不超過長度限制
                             lines = api_response_text.split('\n')
                             for line in lines:
-                                if len(current_part) + len(line) + 1 > 1990:
-                                    if current_part:
+                                if len(current_part) + len(line) + 1 > 1990: # 預留一點空間
+                                    if current_part: # 添加之前的部分
                                         parts.append(current_part)
+                                    # 如果單行就超過限制，強制分割
                                     if len(line) > 1990:
                                         for i in range(0, len(line), 1990):
                                             parts.append(line[i:i+1990])
-                                        current_part = ""
+                                        current_part = "" # 重置當前部分
                                     else:
-                                        current_part = line
+                                        current_part = line # 開始新的部分
                                 else:
+                                    # 添加到當前部分
                                     if current_part:
                                         current_part += "\n" + line
                                     else:
                                         current_part = line
-                            if current_part:
+                            if current_part: # 添加最後一部分
                                 parts.append(current_part)
 
+                            # 分批發送
                             first_part = True
                             for i, part in enumerate(parts):
                                 part_to_send = part.strip()
-                                if not part_to_send: continue
+                                if not part_to_send: continue # 跳過空部分
                                 try:
                                     if first_part:
+                                        # 第一部分使用 reply
                                         await message.reply(part_to_send, mention_author=False)
                                         first_part = False
                                     else:
+                                        # 後續部分使用 send
                                         await channel.send(part_to_send)
                                     logger.info(f"已發送長回覆的第 {i+1}/{len(parts)} 部分 (伺服器 {guild_id})。")
-                                    await asyncio.sleep(0.5)
+                                    await asyncio.sleep(0.5) # 短暫延遲避免速率限制
                                 except discord.HTTPException as send_e:
                                     logger.error(f"發送長回覆的第 {i+1} 部分時出錯 (伺服器 {guild_id}): {send_e}")
-                                    break
+                                    break # 出錯則停止發送後續部分
                         else:
+                            # 短訊息直接 reply
                             await message.reply(api_response_text, mention_author=False)
                             logger.info(f"已發送回覆給使用者 {user_id} (伺服器 {guild_id})。")
 
@@ -1758,26 +1782,35 @@ async def on_message(message: discord.Message):
                         logger.warning(f"Gemini API 返回空文本回應 (伺服器 {guild_id}, 使用者 {user_id})。")
                         await message.reply("嗯...我好像不知道該說什麼。", mention_author=False)
 
+                # --- API 調用錯誤處理 ---
                 except genai.types.BlockedPromptException as e:
                     logger.warning(f"Gemini API (send_message) 因提示被阻擋而出錯 (使用者 {user_id}, 伺服器 {guild_id}): {e}")
                     await message.reply("抱歉，您的訊息觸發了內容限制，我無法處理。", mention_author=False)
                 except genai.types.StopCandidateException as e:
                      logger.warning(f"Gemini API (send_message) 因停止生成而出錯 (使用者 {user_id}, 伺服器 {guild_id}): {e}")
                      await message.reply("抱歉，產生回應時似乎被中斷了，請稍後再試。", mention_author=False)
+                # 可以添加更多針對性的 genai 錯誤處理
+                # except genai.types.InternalServerError as e:
+                #     logger.error(f"Gemini API 內部伺服器錯誤: {e}")
+                #     await message.reply("抱歉，AI 服務暫時出現問題，請稍後再試。", mention_author=False)
                 except Exception as api_call_e:
                     logger.exception(f"與 Gemini API 互動時發生錯誤 (使用者 {user_id}, 伺服器 {guild_id}): {api_call_e}")
                     await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
 
+            # --- Discord 操作錯誤處理 ---
             except discord.errors.HTTPException as e:
-                if e.status == 403:
+                if e.status == 403: # Forbidden
                     logger.error(f"權限錯誤 (403): 無法在頻道 {channel.id} 回覆或執行操作 (伺服器 {guild_id})。錯誤: {e.text}")
+                    # 嘗試私訊使用者告知
                     try:
                         await author.send(f"我在頻道 <#{channel.id}> 中似乎缺少回覆訊息的權限，請檢查設定。")
                     except discord.errors.Forbidden:
                         logger.error(f"無法私訊使用者 {user_id} 告知權限錯誤 (伺服器 {guild_id})。")
                 else:
                     logger.exception(f"處理訊息時發生 HTTP 錯誤 (使用者 {user_id}, 伺服器 {guild_id}): {e}")
-                    await message.reply(f"處理訊息時發生網路錯誤 ({e.status})。", mention_author=False)
+                    try:
+                        await message.reply(f"處理訊息時發生網路錯誤 ({e.status})。", mention_author=False)
+                    except discord.HTTPException: pass # 如果連錯誤訊息都發不出去就算了
             except Exception as e:
                 logger.exception(f"處理訊息時發生非預期錯誤 (使用者 {user_id}, 伺服器 {guild_id}): {e}")
                 try:
@@ -1793,39 +1826,38 @@ def bot_run():
     if not API_KEY:
         logger.warning("設定檔中未設定 Gemini API Key！AI 功能將被禁用。")
 
-    # --- 載入 STT 模型 (移到 bot_run 開始前) ---
     global whisper_model, vad_model
     try:
-        logger.info("正在載入 VAD 模型...")
-        # vad_model = VADDetector() # 根據你的 VAD 函式庫初始化
-        # 範例：使用 Silero VAD
-        # *** 注意：確保 torch hub.load 不會因網路問題或模型下載失敗而中斷 ***
-        # 可能需要添加 try-except 或檢查網路連接
-        vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False)
-        (get_speech_timestamps, _, read_audio, *_) = utils
+        logger.info("正在載入 VAD 模型 (Silero VAD)...")
+        # 指定本地模型路徑或讓 torch hub 自動下載
+        vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                          model='silero_vad',
+                                          # force_reload=True, # 開發時可以強制重新載入
+                                          trust_repo=True) # 需要信任 repo
+        # (get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks) = utils
         logger.info("VAD 模型載入完成。")
 
-        logger.info("正在載入 Whisper 模型...")
-        # whisper_model = load_model("medium") # 選擇模型大小 (e.g., tiny, base, small, medium, large)
-        # 範例：使用 OpenAI Whisper
-        whisper_model = whisper.load_model("base") # 選擇適合你硬體和需求的模型
-        logger.info(f"Whisper 模型載入完成。")
+        logger.info("正在載入 Whisper 模型 (base)...")
+        # 可以選擇不同大小的模型: tiny, base, small, medium, large
+        # 首次運行會下載模型檔案
+        whisper_model = whisper.load_model("base")
+        logger.info(f"Whisper 模型載入完成。 Device: {whisper_model.device}")
 
     except Exception as e:
-        logger.critical(f"載入 STT 模型失敗: {e}", exc_info=True)
-        logger.warning("STT 功能可能無法使用。")
+        logger.critical(f"載入 STT 或 VAD 模型失敗: {e}", exc_info=True)
+        logger.warning("STT/VAD 功能可能無法使用。")
         vad_model = None
         whisper_model = None
-    # -----------------------------------------
 
 
     logger.info("正在嘗試啟動機器人...")
     try:
+        # 運行 bot
         bot.run(discord_bot_token, log_handler=None, reconnect=True)
     except discord.errors.LoginFailure:
         logger.critical("登入失敗: 提供了無效的 Discord Token。")
     except discord.PrivilegedIntentsRequired:
-         logger.critical("需要特權 Intents (例如 Members 或 Presence) 但未在 Discord 開發者門戶啟用。")
+         logger.critical("需要特權 Intents (例如 Members 或 Presence) 但未在 Discord 開發者門戶啟用。請檢查 Bot 設定。")
     except discord.HTTPException as e:
         logger.critical(f"因 HTTP 錯誤無法連接到 Discord: {e}")
     except KeyboardInterrupt:
@@ -1838,12 +1870,7 @@ def bot_run():
 
 if __name__ == "__main__":
     logger.info("從主執行區塊啟動機器人...")
-    # 全域變數初始化 (VAD/Whisper) - 移到 bot_run 之前確保模型載入
-    # whisper_model = None
-    # vad_model = None
-    # audio_buffers = defaultdict(bytes)
-    # vad_states = defaultdict(lambda: {'is_speaking': False, 'silence_frames': 0}) # 初始化預設值
-
+    # 初始化並運行 Bot
     bot_run()
     logger.info("機器人執行完畢。")
 
