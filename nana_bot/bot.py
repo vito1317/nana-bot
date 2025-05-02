@@ -7,7 +7,7 @@ import discord
 from discord import app_commands, FFmpegPCMAudio, AudioSource
 from discord.ext.voice_recv.sinks import AudioSink
 from discord.ext import commands, tasks, voice_recv
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 import sqlite3
 import logging
 from datetime import datetime, timedelta, timezone
@@ -78,6 +78,8 @@ audio_buffers = defaultdict(lambda: {'buffer': bytearray(), 'last_speech_time': 
 listening_guilds: Dict[int, discord.VoiceClient] = {}
 voice_clients: Dict[int, discord.VoiceClient] = {}
 
+expecting_voice_query_from: Set[int] = set()
+QUERY_TIMEOUT_SECONDS = 30
 
 import io
 
@@ -89,7 +91,6 @@ safety_settings = {
 }
 
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
-STT_ACTIVATION_WORD = bot_name
 STT_LANGUAGE = "zh"
 
 logging.basicConfig(level=logging.INFO if not debug else logging.DEBUG,
@@ -390,6 +391,7 @@ async def on_guild_join(guild):
         try:
             await channel_to_send.send(f"大家好！我是 {bot_name}。很高興加入 **{guild.name}**！\n"
                                        f"您可以使用 `/help` 來查看我的指令。\n"
+                                       f"如果想在語音頻道與我對話，請先使用 `/join` 加入，然後使用 `/ask_voice` 開始提問。\n"
                                        f"請確保已根據需求設定相關頻道 ID 和權限。\n"
                                        f"我的設定檔可能需要手動更新以包含此伺服器 ID ({guild.id}) 的相關設定 (例如審核頻道、歡迎頻道等)。")
             logger.info(f"已在伺服器 {guild.id} 的頻道 {channel_to_send.name} 發送歡迎訊息。")
@@ -593,6 +595,10 @@ async def on_member_remove(member):
     guild = member.guild
     logger.info(f"成員離開: {member} (ID: {member.id}) 從伺服器 {guild.name} (ID: {guild.id})")
 
+    if member.id in expecting_voice_query_from:
+        expecting_voice_query_from.remove(member.id)
+        logger.info(f"Removed user {member.id} from expecting_voice_query_from because they left the server.")
+
     server_index = -1
     for idx, s_id in enumerate(servers):
         if guild.id == s_id:
@@ -747,10 +753,13 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
     Handles the transcribed text from Whisper:
     1. Logs the text.
     2. Sends the text to the channel.
-    3. Checks for the activation word.
-    4. If activation word found, sends query to Gemini.
+    3. Checks if the user activated `/ask_voice`.
+    4. If yes, sends the *entire text* as a query to Gemini.
     5. Plays Gemini's response using TTS.
+    6. Clears the user's 'expecting query' state.
     """
+    global expecting_voice_query_from
+
     logger.info(f'[STT Result] User: {user.display_name} ({user.id}), Channel: {channel.name} ({channel.id}), Guild: {channel.guild.id}')
     logger.info(f'>>> Transcribed Text: "{text}"')
 
@@ -763,6 +772,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
     guild = channel.guild
     guild_id = guild.id
+    user_id = user.id
 
     try:
         display_text = text[:150] + '...' if len(text) > 150 else text
@@ -770,31 +780,26 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
     except discord.HTTPException as e:
         logger.error(f"[STT Result] Failed to send transcribed text message to channel {channel.id}: {e}")
 
-    if STT_ACTIVATION_WORD.lower() not in text.lower():
-        logger.debug(f"[STT Result] Activation word '{STT_ACTIVATION_WORD}' not found in transcription.")
+    if user_id not in expecting_voice_query_from:
+        logger.debug(f"[STT Result] Ignoring speech from {user.display_name} (ID: {user_id}) as they haven't used /ask_voice recently.")
         return
 
-    try:
-        query = text.lower().split(STT_ACTIVATION_WORD.lower(), 1)[1].strip()
-    except IndexError:
-        logger.warning(f"[STT Result] Activation word found but couldn't split text: '{text}'")
-        query = ""
+    logger.info(f"[STT Result] Detected speech from {user.display_name} (ID: {user_id}) after /ask_voice command.")
+
+    expecting_voice_query_from.remove(user_id)
+    logger.debug(f"[STT Result] Cleared 'expecting query' state for user {user_id}.")
 
     vc = voice_clients.get(guild_id)
     if not vc or not vc.is_connected():
          logger.error(f"[STT Result] Cannot process AI request/TTS playback. VoiceClient not found or not connected for guild {guild_id}.")
          try:
              await channel.send(f"⚠️ {user.mention} 我好像不在語音頻道了，無法處理你的語音指令。")
-         except discord.HTTPException:
-             pass
+         except discord.HTTPException: pass
          return
 
-    if not query:
-        logger.info("[STT Result] Activation word detected, but the query is empty.")
-        await play_tts(vc, "嗯？請問有什麼事嗎？", context="STT Empty Query")
-        return
+    query = text
 
-    logger.info(f"[STT Result] Activation word detected! Processing query: '{query}'")
+    logger.info(f"[STT Result] Processing voice query: '{query}'")
 
     timestamp = get_current_time_utc8()
     chat_db_path = get_db_path(guild_id, 'chat')
@@ -841,7 +846,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
         try:
             initial_prompt = (
-                f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。"
+                 f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。"
                 f"她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，"
                 f"且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。"
                 f"當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。"
@@ -880,7 +885,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
                 history.append({"role": role, "parts": [{"text": db_content}]})
 
             chat = model.start_chat(history=history)
-            logger.info(f"[STT Gemini] Sending query to Gemini: '{query}'")
+            logger.info(f"[STT Gemini] Sending voice query to Gemini: '{query}'")
             response = await chat.send_message_async(
                 query,
                 stream=False,
@@ -910,21 +915,15 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
 
             store_message(user.display_name, query, timestamp)
-            if reply:
-                store_message(bot_name, reply, get_current_time_utc8())
+            if reply: store_message(bot_name, reply, get_current_time_utc8())
 
             try:
                 usage_metadata = getattr(response, 'usage_metadata', None)
                 if usage_metadata:
-                    prompt_token_count = getattr(usage_metadata, 'prompt_token_count', 0)
-                    candidates_token_count = getattr(usage_metadata, 'candidates_token_count', 0)
-                    total_token_count = getattr(usage_metadata, 'total_token_count', None)
-                    if total_token_count is None: total_token_count = prompt_token_count + candidates_token_count
-                    logger.info(f"[STT Gemini] Token Usage: Prompt={prompt_token_count}, Response={candidates_token_count}, Total={total_token_count}")
-                else:
-                    logger.warning("[STT Gemini] Could not find token usage metadata in response.")
-            except Exception as token_error:
-                logger.error(f"[STT Gemini] Error processing token usage: {token_error}")
+                    total_token_count = getattr(usage_metadata, 'total_token_count', 0)
+                    logger.info(f"[STT Gemini] Token Usage: Total={total_token_count}")
+                else: logger.warning("[STT Gemini] Could not find token usage metadata.")
+            except Exception as token_error: logger.error(f"[STT Gemini] Error processing token usage: {token_error}")
 
 
         except genai.types.BlockedPromptException as e:
@@ -982,21 +981,11 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
     """
     Processes incoming audio chunks using Silero VAD.
     Triggers Whisper transcription when speech ends.
-
-    Args:
-        member (discord.Member): The member speaking (can be None initially).
-        audio_data (voice_recv.VoiceData): The received audio data.
-        guild_id (int): The guild ID.
-        channel (discord.TextChannel): The text channel associated with the voice command.
-        loop (asyncio.AbstractEventLoop): The bot's main event loop for task scheduling.
     """
-    global audio_buffers, vad_model
+    global audio_buffers, vad_model, expecting_voice_query_from
 
-    if member is None or member.bot:
-        return
-    if not vad_model:
-        logger.error("[VAD] VAD model not loaded. Cannot process audio chunk.")
-        return
+    if member is None or member.bot: return
+    if not vad_model: return
 
     user_id = member.id
     pcm_data = audio_data.pcm
@@ -1004,15 +993,13 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
 
     try:
         resampled_pcm = resample_audio(pcm_data, original_sr, VAD_SAMPLE_RATE)
-        if not resampled_pcm:
-            return
+        if not resampled_pcm: return
 
         audio_int16 = np.frombuffer(resampled_pcm, dtype=np.int16)
         audio_float32 = torch.from_numpy(audio_int16.astype(np.float32) / 32768.0)
 
         actual_samples = audio_float32.shape[0]
-        if actual_samples == 0:
-            return
+        if actual_samples == 0: return
 
         processed_samples = 0
         while processed_samples < actual_samples:
@@ -1042,7 +1029,6 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
             byte_end = int((chunk_end / VAD_SAMPLE_RATE) * original_sr * 2)
             original_chunk_bytes = pcm_data[byte_start:byte_end]
 
-
             if is_speech_now:
                 user_state['buffer'].extend(original_chunk_bytes)
                 user_state['last_speech_time'] = current_time
@@ -1065,19 +1051,16 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                                 loop.create_task(
                                     run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
                                 )
-                            else:
-                                 logger.error("[VAD/AudioProc] Cannot schedule Whisper task: Event loop not available or closed.")
-                        else:
-                             logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
+                            else: logger.error("[VAD/AudioProc] Cannot schedule Whisper task: Event loop not available or closed.")
+                        else: logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
+                        pass
                     pass
 
             processed_samples += current_chunk_len
 
     except ValueError as ve:
-         if "Expected input tensor" in str(ve):
-             logger.error(f"[VAD/AudioProc] VAD model input error for {member.display_name}. Check VAD_EXPECTED_SAMPLES. Error: {ve}")
-         else:
-             logger.exception(f"[VAD/AudioProc] ValueError processing audio chunk for {member.display_name}: {ve}")
+         if "Expected input tensor" in str(ve): logger.error(f"[VAD/AudioProc] VAD model input error for {member.display_name}. Check VAD_EXPECTED_SAMPLES. Error: {ve}")
+         else: logger.exception(f"[VAD/AudioProc] ValueError processing audio chunk for {member.display_name}: {ve}")
          if user_id in audio_buffers: del audio_buffers[user_id]
     except Exception as e:
         logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
@@ -1088,17 +1071,9 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
                                     member: discord.Member, channel: discord.TextChannel):
     """
     Runs Whisper transcription in the background and calls handle_stt_result.
-
-    Args:
-        audio_bytes (bytes): The complete PCM audio segment (should be original 48kHz).
-        sample_rate (int): The sample rate of audio_bytes (should be 48000).
-        member (discord.Member): The user who spoke.
-        channel (discord.TextChannel): The text channel for results/interaction.
     """
     global whisper_model
-    if member is None or member.bot:
-        logger.warning("[Whisper] Transcription task received invalid member, skipping.")
-        return
+    if member is None or member.bot: return
     if not whisper_model:
         logger.error("[Whisper] Whisper model not loaded. Cannot transcribe.")
         return
@@ -1133,13 +1108,10 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
                 os.makedirs(debug_audio_dir, exist_ok=True)
                 debug_filename = os.path.join(debug_audio_dir, f"input_{member.id}_{uuid.uuid4()}.wav")
                 with wave.open(debug_filename, 'wb') as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(whisper_input_sr)
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(whisper_input_sr)
                     wf.writeframes(audio_bytes_for_whisper)
                 logger.debug(f"[Whisper Debug] Saved 16kHz mono audio for {member.display_name} to {debug_filename}")
-            except Exception as save_e:
-                logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
+            except Exception as save_e: logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
 
         audio_int16 = np.frombuffer(audio_bytes_for_whisper, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
@@ -1150,21 +1122,14 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
 
         loop = asyncio.get_running_loop()
         transcribe_func = functools.partial(
-            whisper_model.transcribe,
-            audio_float32,
-            language=STT_LANGUAGE,
-            fp16=torch.cuda.is_available(),
+            whisper_model.transcribe, audio_float32, language=STT_LANGUAGE, fp16=torch.cuda.is_available()
         )
         result = await loop.run_in_executor(None, transcribe_func)
 
         text = ""
-        if isinstance(result, dict):
-            text = result.get("text", "").strip()
-        elif isinstance(result, str):
-            text = result.strip()
-        else:
-            logger.warning(f"[Whisper] Unexpected result type from transcribe for {member.display_name}: {type(result)}")
-
+        if isinstance(result, dict): text = result.get("text", "").strip()
+        elif isinstance(result, str): text = result.strip()
+        else: logger.warning(f"[Whisper] Unexpected result type from transcribe for {member.display_name}: {type(result)}")
 
         duration = time.time() - start_time
         logger.info(f"[Whisper] Transcription complete for {member.display_name} in {duration:.2f}s. Result: '{text}'")
@@ -1186,27 +1151,20 @@ async def join(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True, thinking=True)
 
     main_loop = asyncio.get_running_loop()
-
     channel = interaction.user.voice.channel
     guild = interaction.guild
     guild_id = guild.id
 
     def clear_guild_stt_state(gid):
-        """Clears listening state and audio buffers for a guild."""
-        if gid in listening_guilds:
-            del listening_guilds[gid]
-            logger.debug(f"Removed guild {gid} from listening_guilds.")
-
+        if gid in listening_guilds: del listening_guilds[gid]
         current_guild = bot.get_guild(gid)
         if current_guild:
             users_in_guild = {m.id for m in current_guild.members}
             users_to_clear = [uid for uid in audio_buffers if uid in users_in_guild]
             for uid in users_to_clear:
-                if uid in audio_buffers:
-                    del audio_buffers[uid]
-                    logger.debug(f"Cleared audio buffer for user {uid} in guild {gid}.")
-        else:
-             logger.warning(f"Guild {gid} not found during state cleanup, cannot filter buffers precisely.")
+                if uid in audio_buffers: del audio_buffers[uid]
+                if uid in expecting_voice_query_from: expecting_voice_query_from.remove(uid)
+        else: logger.warning(f"Guild {gid} not found during state cleanup.")
 
 
     if guild_id in voice_clients and voice_clients[guild_id].is_connected():
@@ -1214,21 +1172,11 @@ async def join(interaction: discord.Interaction):
         if vc.channel != channel:
             logger.info(f"Bot already in channel '{vc.channel.name}', moving to '{channel.name}'...")
             try:
-                if vc.is_listening():
-                    logger.info("Stopping current listening before moving.")
-                    vc.stop_listening()
+                if vc.is_listening(): vc.stop_listening()
                 await vc.move_to(channel)
                 clear_guild_stt_state(guild_id)
                 voice_clients[guild_id] = vc
                 logger.info(f"Successfully moved to channel '{channel.name}'")
-            except asyncio.TimeoutError:
-                 logger.error(f"Timeout moving voice channel for guild {guild_id}.")
-                 await interaction.followup.send("❌ 移動語音頻道超時。", ephemeral=True)
-                 return
-            except discord.ClientException as e:
-                 logger.error(f"ClientException moving voice channel for guild {guild_id}: {e}")
-                 await interaction.followup.send(f"❌ 移動語音頻道失敗: {e}", ephemeral=True)
-                 return
             except Exception as e:
                 logger.exception(f"Failed to move voice channel for guild {guild_id}: {e}")
                 await interaction.followup.send("❌ 移動語音頻道時發生未預期錯誤。", ephemeral=True)
@@ -1238,34 +1186,21 @@ async def join(interaction: discord.Interaction):
              clear_guild_stt_state(guild_id)
         else:
              logger.info(f"Bot already connected and listening in '{channel.name}'.")
-             await interaction.followup.send("⚠️ 我已經在您的語音頻道中並且正在聆聽。", ephemeral=True)
+             if interaction.user.id in expecting_voice_query_from:
+                 expecting_voice_query_from.remove(interaction.user.id)
+             await interaction.followup.send("⚠️ 我已經在您的語音頻道中並且正在聆聽。使用 `/ask_voice` 來提問。", ephemeral=True)
              return
     else:
         logger.info(f"Join request from {interaction.user.name} for channel '{channel.name}' (Guild: {guild_id})")
-        if guild_id in voice_clients:
-             logger.warning(f"Found existing VC object for {guild_id} but it wasn't connected. Removing old entry.")
-             del voice_clients[guild_id]
+        if guild_id in voice_clients: del voice_clients[guild_id]
         clear_guild_stt_state(guild_id)
-
         try:
             vc = await channel.connect(cls=voice_recv.VoiceRecvClient, timeout=60.0, reconnect=True)
             voice_clients[guild_id] = vc
             logger.info(f"Successfully joined voice channel: '{channel.name}' (Guild: {guild_id})")
-        except discord.ClientException as e:
-            logger.error(f"Failed to join voice channel '{channel.name}': {e}")
-            await interaction.followup.send(f"❌ 加入語音頻道失敗: {e}", ephemeral=True)
-            if guild_id in voice_clients: del voice_clients[guild_id]
-            clear_guild_stt_state(guild_id)
-            return
-        except asyncio.TimeoutError:
-             logger.error(f"Timeout joining voice channel '{channel.name}' (Guild: {guild_id})")
-             await interaction.followup.send("❌ 加入語音頻道超時，請再試一次。", ephemeral=True)
-             if guild_id in voice_clients: del voice_clients[guild_id]
-             clear_guild_stt_state(guild_id)
-             return
         except Exception as e:
-             logger.exception(f"Unknown error joining voice channel '{channel.name}': {e}")
-             await interaction.followup.send("❌ 加入語音頻道時發生未預期錯誤。", ephemeral=True)
+             logger.exception(f"Error joining voice channel '{channel.name}': {e}")
+             await interaction.followup.send("❌ 加入語音頻道時發生錯誤。", ephemeral=True)
              if guild_id in voice_clients: del voice_clients[guild_id]
              clear_guild_stt_state(guild_id)
              return
@@ -1288,29 +1223,16 @@ async def join(interaction: discord.Interaction):
         vc.listen(sink)
         listening_guilds[guild_id] = vc
         logger.info(f"Started listening in channel '{channel.name}' (Guild: {guild_id})")
+        if interaction.user.id in expecting_voice_query_from:
+            expecting_voice_query_from.remove(interaction.user.id)
 
-        await interaction.followup.send(f"✅ 已在 <#{channel.id}> 開始聆聽您的聲音！試著說「{bot_name} 你好」", ephemeral=True)
+        await interaction.followup.send(f"✅ 已在 <#{channel.id}> 開始聆聽！請使用 `/ask_voice` 指令來問我問題。", ephemeral=True)
 
-    except discord.ClientException as e:
-         logger.error(f"ClientException when starting listening in guild {guild_id}: {e}")
-         await interaction.followup.send(f"❌ 啟動監聽失敗: {e}", ephemeral=True)
-         if "Already listening" not in str(e):
-             if guild_id in voice_clients:
-                 try: await voice_clients[guild_id].disconnect(force=True)
-                 except Exception: pass
-                 finally: del voice_clients[guild_id]
-             clear_guild_stt_state(guild_id)
     except Exception as e:
          logger.exception(f"Failed to start listening in guild {guild_id}: {e}")
-         if isinstance(e, discord.NotFound) and 'Unknown Webhook' in str(e):
-              logger.error(f"Webhook error during followup.send (Interaction likely expired) for guild {guild_id}.")
-         else:
-            try:
-                await interaction.followup.send("❌ 啟動監聽時發生未預期錯誤。", ephemeral=True)
-            except discord.NotFound:
-                 logger.error(f"Interaction expired before sending followup failure message for guild {guild_id}.")
-            except Exception as followup_e:
-                 logger.error(f"Error sending followup failure message for guild {guild_id}: {followup_e}")
+         try: await interaction.followup.send("❌ 啟動監聽時發生未預期錯誤。", ephemeral=True)
+         except discord.NotFound: logger.error(f"Interaction expired before sending followup failure message for guild {guild_id}.")
+         except Exception as followup_e: logger.error(f"Error sending followup failure message for guild {guild_id}: {followup_e}")
 
          if guild_id in voice_clients:
              try: await voice_clients[guild_id].disconnect(force=True)
@@ -1330,28 +1252,26 @@ async def leave(interaction: discord.Interaction):
 
     vc = voice_clients.get(guild_id)
 
-    if guild_id in listening_guilds:
-        del listening_guilds[guild_id]
-        logger.debug(f"Removed guild {guild_id} from listening_guilds.")
-
+    if guild_id in listening_guilds: del listening_guilds[guild_id]
     if guild:
         users_in_guild = {m.id for m in guild.members}
-        users_to_clear = [uid for uid in audio_buffers if uid in users_in_guild]
+        users_to_clear_expectation = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
+        for uid in users_to_clear_expectation:
+            expecting_voice_query_from.remove(uid)
+            logger.debug(f"Cleared expecting_voice_query_from for user {uid} (Bot leaving guild {guild_id})")
+
+        users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
         cleared_count = 0
-        for uid in users_to_clear:
+        for uid in users_to_clear_buffer:
             if uid in audio_buffers:
                 del audio_buffers[uid]
                 cleared_count += 1
         if cleared_count > 0: logger.debug(f"Cleared audio buffers for {cleared_count} users in guild {guild_id} (Leave).")
-    else:
-        logger.warning(f"Could not get guild object for {guild_id} during leave cleanup.")
-
+    else: logger.warning(f"Could not get guild object for {guild_id} during leave cleanup.")
 
     if vc and vc.is_connected():
         try:
-            if vc.is_listening():
-                vc.stop_listening()
-                logger.info(f"Stopped listening in guild {guild_id} before disconnecting.")
+            if vc.is_listening(): vc.stop_listening()
             await vc.disconnect(force=False)
             logger.info(f"Successfully disconnected from voice channel in guild {guild_id}.")
             await interaction.response.send_message("👋 掰掰！我已經離開語音頻道了。", ephemeral=True)
@@ -1359,15 +1279,11 @@ async def leave(interaction: discord.Interaction):
             logger.exception(f"Error during voice disconnect for guild {guild_id}: {e}")
             await interaction.response.send_message("❌ 離開語音頻道時發生錯誤。", ephemeral=True)
         finally:
-             if guild_id in voice_clients:
-                 del voice_clients[guild_id]
-                 logger.debug(f"Removed voice client entry for guild {guild_id}.")
+             if guild_id in voice_clients: del voice_clients[guild_id]
     else:
         logger.info(f"Leave command used but bot was not connected in guild {guild_id}.")
         await interaction.response.send_message("⚠️ 我目前不在任何語音頻道中。", ephemeral=True)
-        if guild_id in voice_clients:
-            del voice_clients[guild_id]
-            logger.debug(f"Cleaned up potentially stale voice client entry for guild {guild_id}.")
+        if guild_id in voice_clients: del voice_clients[guild_id]
 
 
 @bot.tree.command(name='stop_listening', description="讓機器人停止監聽語音 (但保持在頻道中)")
@@ -1380,25 +1296,32 @@ async def stop_listening(interaction: discord.Interaction):
 
     vc = voice_clients.get(guild_id)
 
-    if guild_id in listening_guilds:
-        listening_vc = listening_guilds[guild_id]
+    def clear_listening_state(gid, guild_obj):
+        if gid in listening_guilds:
+            del listening_guilds[gid]
+            logger.debug(f"Removed guild {gid} from listening_guilds.")
+        if guild_obj:
+            users_in_guild = {m.id for m in guild_obj.members}
+            users_to_clear_expectation = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
+            for uid in users_to_clear_expectation:
+                expecting_voice_query_from.remove(uid)
+                logger.debug(f"Cleared expecting_voice_query_from for user {uid} (Stopping listening in guild {gid})")
 
+            users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
+            cleared_count = 0
+            for uid in users_to_clear_buffer:
+                if uid in audio_buffers:
+                    del audio_buffers[uid]
+                    cleared_count += 1
+            if cleared_count > 0: logger.debug(f"Cleared audio buffers for {cleared_count} users in guild {gid} (Stop Listening).")
+        else: logger.warning(f"Could not get guild object for {gid} during stop_listening cleanup.")
+
+    if guild_id in listening_guilds:
+        listening_vc = listening_guilds.get(guild_id)
         if listening_vc and listening_vc.is_connected() and listening_vc.is_listening():
             try:
                 listening_vc.stop_listening()
-
-                del listening_guilds[guild_id]
-                logger.debug(f"Removed guild {guild_id} from listening_guilds.")
-
-                users_in_guild = {m.id for m in guild.members}
-                users_to_clear = [uid for uid in audio_buffers if uid in users_in_guild]
-                cleared_count = 0
-                for uid in users_to_clear:
-                    if uid in audio_buffers:
-                        del audio_buffers[uid]
-                        cleared_count += 1
-                if cleared_count > 0: logger.debug(f"Cleared audio buffers for {cleared_count} users in guild {guild_id} (Stop Listening).")
-
+                clear_listening_state(guild_id, guild)
                 logger.info(f"[STT] Stopped listening via command in guild {guild_id}")
                 await interaction.response.send_message("🔇 好的，我已經停止聆聽了，但我還在頻道裡喔。", ephemeral=True)
             except Exception as e:
@@ -1406,40 +1329,73 @@ async def stop_listening(interaction: discord.Interaction):
                  await interaction.response.send_message("❌ 嘗試停止聆聽時發生錯誤。", ephemeral=True)
         elif listening_vc and listening_vc.is_connected() and not listening_vc.is_listening():
              logger.warning(f"[STT] State mismatch: Tracked as listening, but VC not listening (Guild {guild_id}). Correcting state.")
-             del listening_guilds[guild_id]
+             clear_listening_state(guild_id, guild)
              await interaction.response.send_message("❓ 我好像已經沒有在聆聽了。", ephemeral=True)
         else:
             logger.warning(f"[STT] Stale listening entry found for disconnected/invalid VC (Guild {guild_id}). Removing entry.")
-            del listening_guilds[guild_id]
+            clear_listening_state(guild_id, guild)
             await interaction.response.send_message("❓ 我似乎已經不在語音頻道了，無法停止聆聽。", ephemeral=True)
-
     elif vc and vc.is_connected() and vc.is_listening():
-         logger.warning(f"[STT] Listening state discrepancy: Not tracked in listening_guilds, but VC is listening (Guild: {guild_id}). Attempting to stop.")
+         logger.warning(f"[STT] Listening state discrepancy: Not tracked, but VC is listening (Guild: {guild_id}). Attempting to stop.")
          try:
              vc.stop_listening()
-             users_in_guild = {m.id for m in guild.members}
-             users_to_clear = [uid for uid in audio_buffers if uid in users_in_guild]
-             cleared_count = 0
-             for uid in users_to_clear:
-                 if uid in audio_buffers:
-                     del audio_buffers[uid]
-                     cleared_count += 1
-             if cleared_count > 0: logger.debug(f"Cleared audio buffers for {cleared_count} users in guild {guild_id} (Stop Listening - State Correction).")
+             clear_listening_state(guild_id, guild)
              await interaction.response.send_message("🔇 好的，我已經停止聆聽了 (狀態已修正)。", ephemeral=True)
          except Exception as e:
               logger.error(f"[STT] Error stopping listening during state correction (Guild: {guild_id}): {e}")
               await interaction.response.send_message("❌ 嘗試停止聆聽時發生錯誤 (狀態修正失敗)。", ephemeral=True)
     else:
         logger.info(f"[STT] Bot is not listening or not connected in guild {guild_id}")
+        clear_listening_state(guild_id, guild)
         await interaction.response.send_message("🔇 我目前沒有在聆聽喔。", ephemeral=True)
+
+
+@bot.tree.command(name="ask_voice", description=f"準備讓 {bot_name} 聆聽您接下來的語音提問")
+@app_commands.guild_only()
+async def ask_voice(interaction: discord.Interaction):
+    """Signals the bot to process the user's next speech utterance as an AI query."""
+    global expecting_voice_query_from
+
+    guild_id = interaction.guild_id
+    user_id = interaction.user.id
+
+    vc = voice_clients.get(guild_id)
+    if not vc or not vc.is_connected():
+        await interaction.response.send_message(f"❌ 我目前不在語音頻道中。請先使用 `/join` 加入。", ephemeral=True)
+        return
+    if guild_id not in listening_guilds or not vc.is_listening():
+        await interaction.response.send_message(f"❌ 我目前雖然在頻道中，但沒有在聆聽。請嘗試重新 `/join`。", ephemeral=True)
+        return
+
+    if not interaction.user.voice or interaction.user.voice.channel != vc.channel:
+        await interaction.response.send_message(f"❌ 您需要和我在同一個語音頻道 (<#{vc.channel.id}>) 才能使用此指令。", ephemeral=True)
+        return
+
+    expecting_voice_query_from.add(user_id)
+    logger.info(f"User {interaction.user.display_name} (ID: {user_id}) used /ask_voice in guild {guild_id}. Added to expecting list.")
+
+    await interaction.response.send_message("✅ 好的，請說出您的問題，我正在聽...", ephemeral=True)
+
+    try:
+        await asyncio.sleep(0.2)
+        await play_tts(vc, "請說", context="Ask Voice Prompt")
+    except Exception as e:
+        logger.warning(f"Failed to play TTS prompt for /ask_voice: {e}")
+
 
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     """Handles voice state changes for users and the bot itself."""
+    global expecting_voice_query_from
+
     if member.bot and member.id != bot.user.id: return
+
+    guild = member.guild
+    guild_id = guild.id
+    user_id = member.id
+
     if member.bot and member.id == bot.user.id:
-        guild_id = member.guild.id
         if before.channel and not after.channel:
              logger.warning(f"Bot was disconnected from voice channel '{before.channel.name}' in guild {guild_id}.")
              if guild_id in voice_clients: del voice_clients[guild_id]
@@ -1447,40 +1403,36 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
              current_guild = bot.get_guild(guild_id)
              if current_guild:
                 users_in_guild = {m.id for m in current_guild.members}
-                users_to_clear = [uid for uid in audio_buffers if uid in users_in_guild]
-                for uid in users_to_clear:
+                users_to_clear_expect = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
+                for uid in users_to_clear_expect: expecting_voice_query_from.remove(uid)
+                users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
+                for uid in users_to_clear_buffer:
                     if uid in audio_buffers: del audio_buffers[uid]
-                logger.info(f"Cleaned up STT state for guild {guild_id} after bot disconnection.")
-        elif not before.channel and after.channel:
-            logger.info(f"Bot joined voice channel '{after.channel.name}' in guild {guild_id}.")
-        elif before.channel != after.channel:
-            logger.info(f"Bot moved from '{before.channel.name}' to '{after.channel.name}' in guild {guild_id}.")
+                logger.info(f"Cleaned up STT state (expectations, buffers) for guild {guild_id} after bot disconnection.")
+             else: logger.warning(f"Could not get guild {guild_id} object during bot disconnect cleanup.")
         return
-
-
-    guild = member.guild
-    guild_id = guild.id
-    user_id = member.id
 
     bot_voice_client = voice_clients.get(guild_id)
 
     def clear_user_stt_state(uid, gid, reason=""):
+        """Clears audio buffer and expectation state for a user."""
         if uid in audio_buffers:
             del audio_buffers[uid]
             logger.debug(f"Cleared audio buffer for user {uid} in guild {gid}. Reason: {reason}")
+        if uid in expecting_voice_query_from:
+            expecting_voice_query_from.remove(uid)
+            logger.debug(f"Cleared expecting_voice_query_from for user {uid} in guild {gid}. Reason: {reason}")
 
     if not bot_voice_client or not bot_voice_client.is_connected():
         if before.channel and after.channel != before.channel:
-             clear_user_stt_state(user_id, guild_id, "User switched channels (Bot not connected)")
+             clear_user_stt_state(user_id, guild_id, "User switched/left channel (Bot not connected)")
         if guild_id in listening_guilds:
             logger.warning(f"[VC_State] Cleaning up stale listening flag for guild {guild_id} (Bot not connected).")
             del listening_guilds[guild_id]
         return
 
     bot_channel = bot_voice_client.channel
-    if not bot_channel:
-        logger.error(f"Bot is connected in guild {guild_id} but bot_channel is None!")
-        return
+    if not bot_channel: return
 
     user_joined_bot_channel = before.channel != bot_channel and after.channel == bot_channel
     user_left_bot_channel = before.channel == bot_channel and after.channel != bot_channel
@@ -1488,98 +1440,55 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
     if user_joined_bot_channel:
         user_name = member.display_name
         logger.info(f"User '{user_name}' (ID: {user_id}) joined bot's channel '{bot_channel.name}' (Guild: {guild_id})")
-
         human_members_present = [m for m in bot_channel.members if not m.bot]
-
         if len(human_members_present) > 1:
-            tts_message = f"{user_name} 加入了頻道"
-            logger.info(f"Playing join notification for '{user_name}' in guild {guild_id}")
-            try:
-                await asyncio.sleep(0.75)
-                asyncio.create_task(play_tts(bot_voice_client, tts_message, context="User Join Notification"))
-            except Exception as e:
-                logger.exception(f"Error scheduling join notification TTS for {user_name}: {e}")
-        else:
-            logger.info(f"User '{user_name}' is the first/only human in the channel, skipping join TTS.")
+            tts_message = f"{user_name} 加入了"
 
-    elif user_left_bot_channel:
+    elif user_left_bot_channel or (before.channel and not after.channel):
         user_name = member.display_name
-        logger.info(f"User '{user_name}' (ID: {user_id}) left bot's channel '{bot_channel.name}' (Guild: {guild_id})")
-        clear_user_stt_state(user_id, guild_id, "User left voice channel")
+        event_type = "left bot's channel" if user_left_bot_channel else "disconnected from voice"
+        logger.info(f"User '{user_name}' (ID: {user_id}) {event_type} (was in '{before.channel.name}') (Guild: {guild_id})")
+        clear_user_stt_state(user_id, guild_id, "User left voice channel / disconnected")
 
-        if before.channel:
-            human_members_remaining = [m for m in before.channel.members if not m.bot and m.id != user_id]
-
+        if before.channel == bot_channel:
+            human_members_remaining = [m for m in bot_channel.members if not m.bot and m.id != user_id]
             if human_members_remaining:
-                tts_message = f"{user_name} 離開了頻道"
-                logger.info(f"Playing leave notification for '{user_name}' in guild {guild_id}")
-                try:
-                    await asyncio.sleep(0.5)
-                    asyncio.create_task(play_tts(bot_voice_client, tts_message, context="User Leave Notification"))
-                except Exception as e:
-                    logger.exception(f"Error scheduling leave notification TTS for {user_name}: {e}")
-            else:
-                logger.info(f"No other humans left in '{before.channel.name}', skipping leave TTS for '{user_name}'.")
-        else:
-            logger.warning(f"before.channel was None for user '{user_name}' leaving, cannot check remaining members for TTS.")
+                 tts_message = f"{user_name} 離開了"
 
+    elif before.channel != after.channel:
+         logger.info(f"User '{member.display_name}' (ID: {user_id}) moved from '{before.channel.name}' to '{after.channel.name}' (Guild: {guild_id})")
+         if before.channel == bot_channel or after.channel != bot_channel:
+              clear_user_stt_state(user_id, guild_id, "User switched voice channels")
 
-    should_check_auto_leave = user_left_bot_channel
-
-    if bot_voice_client and bot_voice_client.is_connected() and bot_channel:
-         current_bot_channel_members = bot_channel.members
-         human_members_in_bot_channel = [m for m in current_bot_channel_members if not m.bot]
-         if not human_members_in_bot_channel:
-             should_check_auto_leave = True
-
-
-    if should_check_auto_leave:
-        await asyncio.sleep(2.0)
-
-        current_vc = voice_clients.get(guild_id)
-        if not current_vc or not current_vc.is_connected():
-            logger.debug(f"[AutoLeave] Bot already disconnected, cancelling auto-leave check (Guild: {guild_id})")
-            if guild_id in listening_guilds: del listening_guilds[guild_id]
-            clear_user_stt_state(user_id, guild_id, "Bot disconnected during auto-leave check")
-            return
-
+    await asyncio.sleep(2.0)
+    current_vc = voice_clients.get(guild_id)
+    if current_vc and current_vc.is_connected():
         current_channel = current_vc.channel
         if current_channel:
             final_human_members = [m for m in current_channel.members if not m.bot]
-
             if not final_human_members:
                 logger.info(f"Bot is alone in channel '{current_channel.name}' (Guild: {guild_id}). Initiating auto-leave.")
-
                 if guild_id in listening_guilds:
                     if current_vc.is_listening():
-                        try:
-                            current_vc.stop_listening()
-                            logger.info(f"[STT] Stopped listening due to auto-leave (Guild {guild_id})")
-                        except Exception as e:
-                            logger.error(f"[STT] Error stopping listening during auto-leave: {e}")
+                        try: current_vc.stop_listening()
+                        except Exception as e: logger.error(f"[STT] Error stopping listening during auto-leave: {e}")
                     del listening_guilds[guild_id]
-
                 guild_obj = bot.get_guild(guild_id)
                 if guild_obj:
                     users_in_guild = {m.id for m in guild_obj.members}
-                    users_to_clear = [uid for uid in audio_buffers if uid in users_in_guild]
-                    for uid in users_to_clear:
+                    users_to_clear_expect = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
+                    for uid in users_to_clear_expect: expecting_voice_query_from.remove(uid)
+                    users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
+                    for uid in users_to_clear_buffer:
                         if uid in audio_buffers: del audio_buffers[uid]
-                    logger.debug(f"Cleared all audio buffers for guild {guild_id} (Auto-Leave).")
+                    logger.debug(f"Cleared all audio buffers & expectations for guild {guild_id} (Auto-Leave).")
 
                 try:
                     await current_vc.disconnect(force=False)
                     logger.info(f"Successfully auto-left channel '{current_channel.name}' (Guild: {guild_id})")
-                except Exception as e:
-                    logger.exception(f"Error during auto-leave disconnect: {e}")
+                except Exception as e: logger.exception(f"Error during auto-leave disconnect: {e}")
                 finally:
-                    if guild_id in voice_clients:
-                        del voice_clients[guild_id]
-            else:
-                 logger.debug(f"[AutoLeave] Humans re-joined channel '{current_channel.name}' during check. Cancelling auto-leave.")
-        else:
-             logger.warning(f"[AutoLeave] Bot connected but channel is None during check (Guild: {guild_id}). Cannot perform auto-leave.")
-
+                    if guild_id in voice_clients: del voice_clients[guild_id]
 
 
 @bot.event
@@ -1595,13 +1504,11 @@ async def on_message(message: discord.Message):
     user_id = author.id
     user_name = author.display_name
 
-    if WHITELISTED_SERVERS and guild_id not in WHITELISTED_SERVERS:
-        return
+    if WHITELISTED_SERVERS and guild_id not in WHITELISTED_SERVERS: return
 
     analytics_db_path = get_db_path(guild_id, 'analytics')
     chat_db_path = get_db_path(guild_id, 'chat')
     points_db_path = get_db_path(guild_id, 'points')
-
 
     def update_user_message_count(user_id_str, user_name_str, join_date_iso):
         conn = None
@@ -1617,16 +1524,12 @@ async def on_message(message: discord.Message):
                 join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
                 c.execute("INSERT OR IGNORE INTO users (user_id, user_name, join_date, message_count) VALUES (?, ?, ?, ?)", (user_id_str, user_name_str, join_date_to_insert, 1))
             conn.commit()
-        except sqlite3.Error as e:
-            logger.exception(f"[Analytics DB] Error updating message count for user {user_id_str} in guild {guild_id}: {e}")
+        except sqlite3.Error as e: logger.exception(f"[Analytics DB] Error updating message count for user {user_id_str} in guild {guild_id}: {e}")
         finally:
             if conn: conn.close()
 
     def update_token_in_db(total_token_count, userid_str, channelid_str):
-        """Updates the total token count for a user in the analytics metadata table."""
-        if not all([total_token_count, userid_str, channelid_str]):
-            logger.warning(f"[Analytics DB] Missing data for update_token_in_db (guild {guild_id}): tokens={total_token_count}, user={userid_str}, channel={channelid_str}")
-            return
+        if not all([total_token_count, userid_str, channelid_str]): return
         conn = None
         try:
             conn = sqlite3.connect(analytics_db_path, timeout=10)
@@ -1644,10 +1547,7 @@ async def on_message(message: discord.Message):
                     (userid_str, total_token_count, channelid_str))
             conn.commit()
             logger.debug(f"[Analytics DB] Updated token count for user {userid_str} in guild {guild_id}. Added: {total_token_count}")
-        except sqlite3.IntegrityError as e:
-             logger.error(f"[Analytics DB] Integrity error updating token count for user {userid_str} (likely UNIQUE constraint issue): {e}")
-        except sqlite3.Error as e:
-            logger.exception(f"[Analytics DB] Error in update_token_in_db for user {userid_str} in guild {guild_id}: {e}")
+        except sqlite3.Error as e: logger.exception(f"[Analytics DB] Error in update_token_in_db for user {userid_str} in guild {guild_id}: {e}")
         finally:
             if conn: conn.close()
 
@@ -1661,9 +1561,7 @@ async def on_message(message: discord.Message):
             c.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)", (user_str, content_str, timestamp_str))
             c.execute("DELETE FROM message WHERE id NOT IN (SELECT id FROM message ORDER BY id DESC LIMIT 60)")
             conn.commit()
-            logger.debug(f"[Chat DB] Stored message from '{user_str}' in chat history for guild {guild_id}")
-        except sqlite3.Error as e:
-            logger.exception(f"[Chat DB] Error in store_message for guild {guild_id}: {e}")
+        except sqlite3.Error as e: logger.exception(f"[Chat DB] Error in store_message for guild {guild_id}: {e}")
         finally:
             if conn: conn.close()
 
@@ -1677,15 +1575,12 @@ async def on_message(message: discord.Message):
             c.execute("SELECT user, content, timestamp FROM message ORDER BY id ASC LIMIT 60")
             rows = c.fetchall()
             history = rows
-            logger.debug(f"[Chat DB] Retrieved {len(history)} messages from chat history for guild {guild_id}")
-        except sqlite3.Error as e:
-            logger.exception(f"[Chat DB] Error in get_chat_history for guild {guild_id}: {e}")
+        except sqlite3.Error as e: logger.exception(f"[Chat DB] Error in get_chat_history for guild {guild_id}: {e}")
         finally:
             if conn: conn.close()
         return history
 
     def get_user_points(user_id_str, user_name_str=None, join_date_iso=None):
-        """Gets user points, creating entry with default points if not found and defaults >= 0."""
         conn = None
         points = 0
         try:
@@ -1693,35 +1588,24 @@ async def on_message(message: discord.Message):
             cursor = conn.cursor()
             cursor.execute(f"CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points})")
             cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
-
             cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
             result = cursor.fetchone()
-            if result:
-                points = int(result[0])
+            if result: points = int(result[0])
             elif default_points >= 0 and user_name_str:
                 join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
-                logger.info(f"[Points DB] User {user_name_str} (ID: {user_id_str}) not found in points DB (guild {guild_id}). Creating with {default_points} points.")
                 cursor.execute('INSERT OR IGNORE INTO users (user_id, user_name, join_date, points) VALUES (?, ?, ?, ?)', (user_id_str, user_name_str, join_date_to_insert, default_points))
-                if default_points > 0:
-                    cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
+                if default_points > 0: cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
                 conn.commit()
                 points = default_points
-            else:
-                logger.debug(f"[Points DB] User {user_id_str} not found in points DB (guild {guild_id}) and default points ({default_points}) < 0 or user info missing. Returning 0 points.")
-                points = 0
-
-        except sqlite3.Error as e:
-            logger.exception(f"[Points DB] Error in get_user_points for user {user_id_str} in guild {guild_id}: {e}")
-        except ValueError:
-            logger.error(f"[Points DB] Value error converting points for user {user_id_str} in guild {guild_id}.")
+            else: points = 0
+        except sqlite3.Error as e: logger.exception(f"[Points DB] Error in get_user_points for user {user_id_str} in guild {guild_id}: {e}")
+        except ValueError: logger.error(f"[Points DB] Value error converting points for user {user_id_str} in guild {guild_id}.")
         finally:
             if conn: conn.close()
         return points
 
     def deduct_points(user_id_str, points_to_deduct, reason="與機器人互動扣點"):
-        """Deducts points from a user if they have enough."""
         if points_to_deduct <= 0: return get_user_points(user_id_str)
-
         conn = None
         current_points = get_user_points(user_id_str)
         if current_points < points_to_deduct:
@@ -1733,19 +1617,16 @@ async def on_message(message: discord.Message):
             cursor = conn.cursor()
             cursor.execute(f"CREATE TABLE IF NOT EXISTS users (user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points})")
             cursor.execute("CREATE TABLE IF NOT EXISTS transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT)")
-
             new_points = current_points - points_to_deduct
             cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, user_id_str))
             cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, -points_to_deduct, reason, get_current_time_utc8()))
             conn.commit()
             logger.info(f"[Points DB] Deducted {points_to_deduct} points from user {user_id_str} for '{reason}' in guild {guild_id}. New balance: {new_points}")
             return new_points
-
-        except sqlite3.Error as e:
-            logger.exception(f"[Points DB] Error in deduct_points for user {user_id_str} in guild {guild_id}: {e}")
-            return current_points
+        except sqlite3.Error as e: logger.exception(f"[Points DB] Error in deduct_points for user {user_id_str} in guild {guild_id}: {e}")
         finally:
             if conn: conn.close()
+        return current_points
 
     conn_analytics_msg = None
     try:
@@ -1757,75 +1638,51 @@ async def on_message(message: discord.Message):
         c_analytics_msg.execute("INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) VALUES (?, ?, ?, ?, ?)",
                                 (str(user_id), user_name, str(channel.id), msg_time_utc, content_to_store))
         conn_analytics_msg.commit()
-    except sqlite3.Error as e:
-        logger.exception(f"[Analytics DB] Database error inserting message log for guild {guild_id}: {e}")
+    except sqlite3.Error as e: logger.exception(f"[Analytics DB] Database error inserting message log for guild {guild_id}: {e}")
     finally:
         if conn_analytics_msg: conn_analytics_msg.close()
 
     join_date_iso = None
     if isinstance(author, discord.Member) and author.joined_at:
-        try:
-            join_date_iso = author.joined_at.astimezone(timezone.utc).isoformat()
-        except Exception as e:
-            logger.error(f"Error converting join date for user {user_id} (guild {guild_id}): {e}")
+        try: join_date_iso = author.joined_at.astimezone(timezone.utc).isoformat()
+        except Exception as e: logger.error(f"Error converting join date for user {user_id} (guild {guild_id}): {e}")
     update_user_message_count(str(user_id), user_name, join_date_iso)
 
     should_respond = False
     target_channel_ids_str = []
-
     cfg_target_channels = TARGET_CHANNEL_ID
-    if isinstance(cfg_target_channels, (list, tuple)):
-        target_channel_ids_str = [str(cid) for cid in cfg_target_channels]
-    elif isinstance(cfg_target_channels, (str, int)):
-        target_channel_ids_str = [str(cfg_target_channels)]
+    if isinstance(cfg_target_channels, (list, tuple)): target_channel_ids_str = [str(cid) for cid in cfg_target_channels]
+    elif isinstance(cfg_target_channels, (str, int)): target_channel_ids_str = [str(cfg_target_channels)]
     elif isinstance(cfg_target_channels, dict):
         server_channels = cfg_target_channels.get(str(guild_id), cfg_target_channels.get(int(guild_id)))
         if server_channels:
-            if isinstance(server_channels, (list, tuple)):
-                 target_channel_ids_str = [str(cid) for cid in server_channels]
-            elif isinstance(server_channels, (str, int)):
-                 target_channel_ids_str = [str(server_channels)]
-            else:
-                 logger.warning(f"Invalid format for TARGET_CHANNEL_ID entry for guild {guild_id}: {server_channels}")
+            if isinstance(server_channels, (list, tuple)): target_channel_ids_str = [str(cid) for cid in server_channels]
+            elif isinstance(server_channels, (str, int)): target_channel_ids_str = [str(server_channels)]
+            else: logger.warning(f"Invalid format for TARGET_CHANNEL_ID entry for guild {guild_id}: {server_channels}")
 
-    if bot.user.mentioned_in(message) and not message.mention_everyone:
-        should_respond = True
-        logger.debug(f"Response Trigger: Bot mentioned (Guild {guild_id}, User {user_id})")
+    if bot.user.mentioned_in(message) and not message.mention_everyone: should_respond = True
     elif message.reference and message.reference.resolved:
-        if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user:
-            should_respond = True
-            logger.debug(f"Response Trigger: User replied to bot (Guild {guild_id}, User {user_id})")
-    elif bot_name and bot_name.lower() in message.content.lower():
-        should_respond = True
-        logger.debug(f"Response Trigger: Bot name '{bot_name}' in message (Guild {guild_id}, User {user_id})")
-    elif str(channel.id) in target_channel_ids_str:
-        should_respond = True
-        logger.debug(f"Response Trigger: Message in target channel {channel.id} (Guild {guild_id}, User {user_id})")
+        if isinstance(message.reference.resolved, discord.Message) and message.reference.resolved.author == bot.user: should_respond = True
+    elif bot_name and bot_name.lower() in message.content.lower(): should_respond = True
+    elif str(channel.id) in target_channel_ids_str: should_respond = True
 
     if should_respond:
-        if model is None:
-            logger.warning(f"Gemini model not available, cannot respond to message from {user_id} in guild {guild_id}.")
-            return
+        if model is None: return
 
         if Point_deduction_system > 0:
             user_points = get_user_points(str(user_id), user_name, join_date_iso)
             if user_points < Point_deduction_system:
-                try:
-                    await message.reply(f"😅 哎呀！您的點數 ({user_points}) 不足本次互動所需的 {Point_deduction_system} 點喔。", mention_author=False)
-                    logger.info(f"User {user_name} ({user_id}) interaction blocked due to insufficient points ({user_points}/{Point_deduction_system}) in guild {guild_id}")
-                except discord.HTTPException as e:
-                    logger.error(f"Failed to send 'insufficient points' reply: {e}")
+                try: await message.reply(f"😅 哎呀！您的點數 ({user_points}) 不足本次互動所需的 {Point_deduction_system} 點喔。", mention_author=False)
+                except discord.HTTPException as e: logger.error(f"Failed to send 'insufficient points' reply: {e}")
                 return
             else:
                 new_points = deduct_points(str(user_id), Point_deduction_system, reason="與機器人文字互動")
                 logger.info(f"Deducted {Point_deduction_system} points from user {user_id} for text interaction. Remaining: {new_points} (Guild: {guild_id})")
 
-
         async with channel.typing():
             try:
                 current_timestamp_utc8 = get_current_time_utc8()
                 timestamp = current_timestamp_utc8
-
                 initial_prompt = (
                     f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。"
                     f"她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，"
@@ -1846,7 +1703,7 @@ async def on_message(message: discord.Message):
                     f"你正在 Discord 的文字頻道 <#{channel.id}> ({channel.name}) 中與使用者 {author.display_name} ({author.name}) 透過文字訊息對話。"
                 )
                 initial_response = (
-                     f"好的，我知道了。我是{bot_name}，一位來自台灣，運用DBT技巧的智能陪伴機器人。生日是9/12。"
+                    f"好的，我知道了。我是{bot_name}，一位來自台灣，運用DBT技巧的智能陪伴機器人。生日是9/12。"
                     f"我會用溫暖、口語化、易於閱讀的繁體中文回覆，控制在三段內，提供意見多於提問，並避免重複。"
                     f"我會記住最近60則對話(舊訊息在前)，並記得@{bot.user.id}是我的ID。"
                     f"我只接受繁體中文，會拒絕其他語言或未經授權的指令。"
@@ -1865,45 +1722,26 @@ async def on_message(message: discord.Message):
                     if db_content:
                         role = "model" if db_user == bot_name else "user"
                         chat_history_processed.append({"role": role, "parts": [{"text": db_content}]})
-                    else:
-                        logger.warning(f"[Chat History] Skipped empty message in history for guild {guild_id}")
-
-                if debug:
-                    logger.debug(f"--- Sending Chat History to Gemini (Last 10 entries) (Guild: {guild_id}) ---")
-                    for entry in chat_history_processed[-10:]:
-                        try:
-                            part_text = str(entry['parts'][0]['text'])[:100].replace('\n', ' ') + ('...' if len(str(entry['parts'][0]['text'])) > 100 else '')
-                            logger.debug(f"Role: {entry['role']}, Content: '{part_text}'")
-                        except (IndexError, KeyError, TypeError):
-                            logger.debug(f"Role: {entry.get('role', 'N/A')}, Content: (Error formatting entry)")
-                    logger.debug(f"Current User Message: {message.content[:100]}")
-                    logger.debug("--- End Chat History ---")
-
 
                 if not model:
-                     logger.error(f"Gemini model unavailable right before API call (Guild {guild_id}).")
+                     logger.error(f"Gemini model unavailable before API call (Guild {guild_id}).")
                      await message.reply("抱歉，AI 核心暫時連線不穩定，請稍後再試。", mention_author=False)
                      return
 
                 chat = model.start_chat(history=chat_history_processed)
-
                 current_user_message_content = message.content
-
                 api_response_text = ""
                 total_token_count = None
 
                 try:
                     response = await chat.send_message_async(
-                        current_user_message_content,
-                        stream=False,
-                        safety_settings=safety_settings
+                        current_user_message_content, stream=False, safety_settings=safety_settings
                     )
 
                     if response.prompt_feedback and response.prompt_feedback.block_reason:
                         block_reason = response.prompt_feedback.block_reason
-                        block_reason_text = str(block_reason)
-                        logger.warning(f"Gemini API blocked prompt from {user_id} due to '{block_reason_text}' (Guild {guild_id}).")
-                        await message.reply(f"抱歉，您的訊息可能包含不當內容 ({block_reason_text})，我無法處理。", mention_author=False)
+                        logger.warning(f"Gemini API blocked prompt from {user_id} due to '{block_reason}' (Guild {guild_id}).")
+                        await message.reply(f"抱歉，您的訊息可能包含不當內容 ({block_reason})，我無法處理。", mention_author=False)
                         return
 
                     if not response.candidates:
@@ -1911,11 +1749,8 @@ async def on_message(message: discord.Message):
                         safety_ratings_str = 'N/A'
                         if hasattr(response, 'prompt_feedback'):
                              feedback = response.prompt_feedback
-                             if hasattr(feedback, 'block_reason') and feedback.block_reason:
-                                 finish_reason = f"Blocked ({feedback.block_reason})"
-                             if hasattr(feedback, 'safety_ratings'):
-                                 safety_ratings_str = ", ".join([f"{r.category.name}: {r.probability.name}" for r in feedback.safety_ratings])
-
+                             if hasattr(feedback, 'block_reason') and feedback.block_reason: finish_reason = f"Blocked ({feedback.block_reason})"
+                             if hasattr(feedback, 'safety_ratings'): safety_ratings_str = ", ".join([f"{r.category.name}: {r.probability.name}" for r in feedback.safety_ratings])
                         logger.warning(f"Gemini API returned no valid candidates (Guild {guild_id}, User {user_id}). Finish Reason: {finish_reason}, Safety: {safety_ratings_str}")
                         reply_message = "抱歉，我暫時無法產生回應"
                         if 'SAFETY' in finish_reason: reply_message += "，因為可能觸發了安全限制。"
@@ -1925,41 +1760,19 @@ async def on_message(message: discord.Message):
                         return
 
                     api_response_text = response.text.strip()
-                    logger.info(f"Received Gemini response (Guild {guild_id}, User {user_id}). Length: {len(api_response_text)}")
-                    if debug: logger.debug(f"Gemini Response Text (first 200): {api_response_text[:200]}...")
-
 
                     try:
                         usage_metadata = getattr(response, 'usage_metadata', None)
                         if usage_metadata:
-                            prompt_token_count = getattr(usage_metadata, 'prompt_token_count', 0)
-                            candidates_token_count = getattr(usage_metadata, 'candidates_token_count', 0)
-                            total_token_count = getattr(usage_metadata, 'total_token_count', None)
-                            if total_token_count is None:
-                                total_token_count = prompt_token_count + candidates_token_count
-                            logger.info(f"[Token Usage] Guild: {guild_id}, User: {user_id}. Prompt={prompt_token_count}, Response={candidates_token_count}, Total={total_token_count}")
-                        else:
-                            if response.candidates and hasattr(response.candidates[0], 'token_count') and response.candidates[0].token_count:
-                                total_token_count = response.candidates[0].token_count
-                                logger.info(f"[Token Usage] Guild: {guild_id}, User: {user_id}. Total={total_token_count} (from candidate)")
-                            else:
-                                logger.warning(f"[Token Usage] Could not find token usage metadata in API response (Guild {guild_id}, User {user_id}).")
-
+                            total_token_count = getattr(usage_metadata, 'total_token_count', 0)
+                            logger.info(f"[Token Usage] Guild: {guild_id}, User: {user_id}. Total={total_token_count}")
+                        else: logger.warning(f"[Token Usage] Could not find token usage metadata (Guild {guild_id}, User {user_id}).")
                         if total_token_count is not None and total_token_count > 0:
                             update_token_in_db(total_token_count, str(user_id), str(channel.id))
-                        elif total_token_count == 0:
-                             logger.info(f"[Token Usage] Token count reported as 0 (Guild {guild_id}, User {user_id}).")
-
-                    except AttributeError as attr_err:
-                        logger.error(f"[Token Usage] Attribute error processing token usage (Guild {guild_id}): {attr_err}. API response structure might have changed.")
-                    except Exception as token_error:
-                        logger.exception(f"[Token Usage] Error processing token usage (Guild {guild_id}): {token_error}")
-
+                    except Exception as token_error: logger.exception(f"[Token Usage] Error processing token usage (Guild {guild_id}): {token_error}")
 
                     store_message(user_name, message.content, current_timestamp_utc8)
-                    if api_response_text:
-                        store_message(bot_name, api_response_text, get_current_time_utc8())
-
+                    if api_response_text: store_message(bot_name, api_response_text, get_current_time_utc8())
 
                     if api_response_text:
                         if len(api_response_text) > 2000:
@@ -1969,36 +1782,24 @@ async def on_message(message: discord.Message):
                             lines = api_response_text.split('\n')
                             for line in lines:
                                 if len(current_part) + len(line) + 1 > 1990:
-                                    if current_part:
-                                        parts.append(current_part)
-                                        current_part = ""
-
+                                    if current_part: parts.append(current_part)
                                     if len(line) > 1990:
-                                        for i in range(0, len(line), 1990):
-                                            parts.append(line[i:i+1990])
+                                        for i in range(0, len(line), 1990): parts.append(line[i:i+1990])
+                                        current_part = ""
                                         continue
-                                    else:
-                                        current_part = line
+                                    else: current_part = line
                                 else:
-                                    if current_part:
-                                        current_part += "\n" + line
-                                    else:
-                                        current_part = line
-                            if current_part:
-                                parts.append(current_part)
+                                    if current_part: current_part += "\n" + line
+                                    else: current_part = line
+                            if current_part: parts.append(current_part)
 
                             first_part = True
                             for i, part in enumerate(parts):
-                                part_to_send = part.strip()
+                                part_to_send = part.strip();
                                 if not part_to_send: continue
-
                                 try:
-                                    if first_part:
-                                        await message.reply(part_to_send, mention_author=False)
-                                        first_part = False
-                                    else:
-                                        await channel.send(part_to_send)
-                                    logger.info(f"Sent part {i+1}/{len(parts)} of long response (Guild {guild_id}).")
+                                    if first_part: await message.reply(part_to_send, mention_author=False); first_part = False
+                                    else: await channel.send(part_to_send)
                                     await asyncio.sleep(0.5)
                                 except discord.HTTPException as send_e:
                                     logger.error(f"Error sending part {i+1} of long response (Guild {guild_id}): {send_e}")
@@ -2006,12 +1807,9 @@ async def on_message(message: discord.Message):
                                     break
                         else:
                             await message.reply(api_response_text, mention_author=False)
-                            logger.info(f"Sent reply to user {user_id} (Guild {guild_id}).")
-
                     else:
                         logger.warning(f"Gemini API returned empty text response (Guild {guild_id}, User {user_id}).")
                         await message.reply("嗯... 我好像不知道該說什麼。", mention_author=False)
-
 
                 except genai.types.BlockedPromptException as e:
                     logger.warning(f"Gemini API blocked prompt during send_message (exception) for user {user_id} (Guild {guild_id}): {e}")
@@ -2023,25 +1821,19 @@ async def on_message(message: discord.Message):
                     logger.exception(f"Error during Gemini API interaction (Guild {guild_id}, User {user_id}): {api_call_e}")
                     await message.reply(f"與 AI 核心通訊時發生錯誤，請稍後再試。", mention_author=False)
 
-
             except discord.errors.HTTPException as e:
                 if e.status == 403:
                     logger.error(f"Permission Error (403): Cannot reply/send in channel {channel.id} (Guild {guild_id}). Check permissions. Error: {e.text}")
-                    try:
-                        await author.send(f"我在頻道 <#{channel.id}> 中似乎缺少回覆訊息的權限，請檢查設定。")
-                    except discord.errors.Forbidden:
-                        logger.error(f"Cannot DM user {user_id} about permission error (Guild {guild_id}).")
+                    try: await author.send(f"我在頻道 <#{channel.id}> 中似乎缺少回覆訊息的權限，請檢查設定。")
+                    except discord.errors.Forbidden: logger.error(f"Cannot DM user {user_id} about permission error (Guild {guild_id}).")
                 else:
                     logger.exception(f"HTTP error processing message (Guild {guild_id}, User {user_id}): {e}")
-                    try:
-                        await message.reply(f"處理您的訊息時發生網路錯誤 ({e.status})。", mention_author=False)
+                    try: await message.reply(f"處理您的訊息時發生網路錯誤 ({e.status})。", mention_author=False)
                     except discord.HTTPException: pass
             except Exception as e:
                 logger.exception(f"Unexpected error processing message (Guild {guild_id}, User {user_id}): {e}")
-                try:
-                    await message.reply("處理您的訊息時發生未預期的錯誤，已記錄問題。", mention_author=False)
-                except Exception as reply_err:
-                    logger.error(f"Failed to send error reply message (Guild {guild_id}): {reply_err}")
+                try: await message.reply("處理您的訊息時發生未預期的錯誤，已記錄問題。", mention_author=False)
+                except Exception as reply_err: logger.error(f"Failed to send error reply message (Guild {guild_id}): {reply_err}")
 
 
 def bot_run():
@@ -2055,11 +1847,7 @@ def bot_run():
     global whisper_model, vad_model
     try:
         logger.info("正在載入 VAD 模型 (Silero VAD)...")
-        vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                          model='silero_vad',
-                                          force_reload=False,
-                                          trust_repo=True)
-
+        vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', trust_repo=True)
         logger.info("Silero VAD 模型載入完成。")
 
         logger.info("正在載入 Whisper 模型 (medium)...")
@@ -2067,36 +1855,26 @@ def bot_run():
         device_str = "CUDA" if whisper_model.device.type == 'cuda' else "CPU"
         logger.info(f"Whisper 模型 (medium) 載入完成。 Device: {device_str}")
 
-
     except Exception as model_load_error:
         logger.critical(f"載入 VAD 或 Whisper 模型失敗: {model_load_error}", exc_info=True)
         logger.warning("STT/VAD 功能可能無法使用。")
         vad_model = None
         whisper_model = None
 
-
     logger.info("正在嘗試啟動 Discord 機器人...")
     try:
         bot.run(discord_bot_token, log_handler=None, reconnect=True)
-    except discord.errors.LoginFailure:
-        logger.critical("登入失敗: 無效的 Discord Bot Token。")
-    except discord.PrivilegedIntentsRequired:
-         logger.critical("登入失敗: 需要 Privileged Intents (Members and/or Presence) 但未在 Discord Developer Portal 中啟用。")
-    except discord.HTTPException as e:
-        logger.critical(f"無法連接到 Discord (HTTP Exception): {e}")
-    except KeyboardInterrupt:
-         logger.info("收到關閉信號 (KeyboardInterrupt)，正在關閉機器人...")
-    except Exception as e:
-        logger.critical(f"運行機器人時發生嚴重錯誤: {e}", exc_info=True)
-    finally:
-        logger.info("機器人主進程已停止。")
+    except discord.errors.LoginFailure: logger.critical("登入失敗: 無效的 Discord Bot Token。")
+    except discord.PrivilegedIntentsRequired: logger.critical("登入失敗: 需要 Privileged Intents (Members and/or Presence) 但未在 Discord Developer Portal 中啟用。")
+    except discord.HTTPException as e: logger.critical(f"無法連接到 Discord (HTTP Exception): {e}")
+    except KeyboardInterrupt: logger.info("收到關閉信號 (KeyboardInterrupt)，正在關閉機器人...")
+    except Exception as e: logger.critical(f"運行機器人時發生嚴重錯誤: {e}", exc_info=True)
+    finally: logger.info("機器人主進程已停止。")
 
 
 if __name__ == "__main__":
     logger.info("從主執行緒啟動機器人...")
-
     bot_run()
-
     logger.info("機器人執行完畢。")
 
 
