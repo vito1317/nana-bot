@@ -57,6 +57,8 @@ import whisper
 import tempfile
 import edge_tts
 import functools
+import wave # Added for saving WAV
+import uuid # Added for unique filenames
 
 
 whisper_model = None
@@ -705,15 +707,21 @@ async def on_member_remove(member):
 
 async def handle_stt_result(text: str, user: discord.Member, channel: discord.TextChannel):
 
-    logger.info(f'已辨識文字:{user.display_name}說{text}')
+    logger.info(f'已辨識文字:{user.display_name}說{text}') # Log includes the potentially empty text
     if not text:
-        return
+        # Optionally, inform the user that nothing was transcribed
+        # try:
+        #     await channel.send(f"🎤 {user.display_name}，我好像沒聽清楚你說了什麼。")
+        # except discord.HTTPException:
+        #     pass
+        return # Stop processing if text is empty
     if user is None:
         logger.warning("[STT_Result] Received result with user=None, skipping.")
         return
 
     logger.info(f"[STT_Result] 來自 {user.display_name} (ID: {user.id}) 的辨識結果: '{text}'")
     try:
+        # Report the transcription result (even if it was empty before the 'if not text' check)
         await channel.send(f"🔊 {user.display_name} 說：「{text}」")
     except discord.HTTPException as e:
         logger.error(f"[STT_Result] 發送辨識結果訊息失敗: {e}")
@@ -876,10 +884,18 @@ def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
     except Exception as e:
         logger.error(f"[Resample] 音訊重取樣失敗 from {original_sr} to {target_sr}: {e}")
         return pcm_data
+# Modified signature to accept loop
+def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel, loop: asyncio.AbstractEventLoop):
+    """
+    處理從 Discord 收到的音訊數據塊 (使用 Silero VAD)。
 
-
-def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel):
-
+    Args:
+        member (discord.Member): 說話的成員 (可能為 None)。
+        audio_data (voice_recv.VoiceData): 包含 PCM 音訊數據的對象。
+        guild_id (int): 伺服器 ID。
+        channel (discord.TextChannel): 文字頻道。
+        loop (asyncio.AbstractEventLoop): The bot's main event loop.
+    """
     global audio_buffers, vad_model
 
     if member is None or member.bot:
@@ -920,10 +936,6 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         # processed_audio_tensor = processed_audio_tensor.to(vad_model.device) # Uncomment if vad_model is on GPU
 
         # 4. Use VAD model
-        # The model expects batch dimension, but we process one chunk at a time
-        # The error indicates it might internally handle batches? Let's try without explicit batch dim first.
-        # If error persists, uncomment the line below.
-        # processed_audio_tensor = processed_audio_tensor.unsqueeze(0) # Add batch dimension if needed
         speech_prob = vad_model(processed_audio_tensor, VAD_SAMPLE_RATE).item()
         is_speech_now = speech_prob >= VAD_THRESHOLD
 
@@ -949,9 +961,13 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                     # Trigger Whisper if buffer has enough ORIGINAL data
                     if len(full_speech_buffer) > original_sr * 2 * 0.2: # Check against original_sr
                         logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes)")
-                        asyncio.create_task(
-                            run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
-                        )
+                        # --- Use the passed loop to create the task ---
+                        if loop:
+                            loop.create_task(
+                                run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
+                            )
+                        else:
+                             logger.error("[VAD/AudioProc] Cannot schedule Whisper task: No event loop provided.")
                     else:
                          logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
                 else:
@@ -961,12 +977,17 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
 
     except Exception as e:
         # Check specifically for the ValueError related to samples if it recurs
+        processed_audio_tensor_shape = 'N/A'
+        try:
+            processed_audio_tensor_shape = processed_audio_tensor.shape
+        except NameError:
+            pass # Variable might not be defined if error happened earlier
+
         if "Provided number of samples is" in str(e):
-             logger.error(f"[VAD/AudioProc] VAD input size error for {member.display_name}. Input shape attempted: {processed_audio_tensor.shape}. Error: {e}")
+             logger.error(f"[VAD/AudioProc] VAD input size error for {member.display_name}. Input shape attempted: {processed_audio_tensor_shape}. Error: {e}")
         else:
              logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
-        if user_id in audio_buffers: del audio_buffers[user_id]
-
+        if user_id in audio_buffers: del audio_buffers[user_id] # Ensure cleanup even on error
 
 
 async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, 
@@ -1015,6 +1036,9 @@ async def join(interaction: discord.Interaction):
         return
 
     await interaction.response.defer(ephemeral=True)
+
+    # --- Get the main event loop ---
+    main_loop = asyncio.get_running_loop()
 
     channel = interaction.user.voice.channel
     guild_id = interaction.guild.id
@@ -1091,8 +1115,9 @@ async def join(interaction: discord.Interaction):
         return
 
 
-
-    callback = functools.partial(process_audio_chunk, guild_id=guild_id, channel=interaction.channel)
+    # --- Create Sink Callback with Loop ---
+    # Pass the main_loop to the partial function
+    callback = functools.partial(process_audio_chunk, guild_id=guild_id, channel=interaction.channel, loop=main_loop)
     sink = BasicSink(callback)
 
     try:
@@ -1108,7 +1133,14 @@ async def join(interaction: discord.Interaction):
               logger.error(f"Webhook error during followup despite defer (Server: {guild_id}). Interaction might have expired.")
               # Cannot send followup here either
          else:
-              await interaction.followup.send("❌ 啟動監聽失敗。", ephemeral=True)
+            # Use try-except for the followup just in case the interaction expired between defer and here
+            try:
+                await interaction.followup.send("❌ 啟動監聽失敗。", ephemeral=True)
+            except discord.NotFound:
+                 logger.error(f"Interaction expired before sending followup failure message (Server: {guild_id}).")
+            except Exception as followup_e:
+                 logger.error(f"Error sending followup failure message (Server: {guild_id}): {followup_e}")
+
 
          if guild_id in voice_clients:
              try:
@@ -1118,7 +1150,7 @@ async def join(interaction: discord.Interaction):
              finally:
                  if guild_id in voice_clients:
                      del voice_clients[guild_id]
-         clear_guild_stt_state(guild_id)
+         clear_guild_stt_state(guild_id) # Ensure state is cleared on listen failure too
 
 
 @bot.tree.command(name='leave')
@@ -1835,10 +1867,10 @@ def bot_run():
 
         logger.info("VAD 模型載入完成。")
 
-        logger.info("正在載入 Whisper 模型 (base)...")
+        logger.info("正在載入 Whisper 模型 (base)...") # Consider changing model here if needed
 
 
-        whisper_model = whisper.load_model("base")
+        whisper_model = whisper.load_model("base") # Change "base" to "small" or "medium" for better accuracy
         logger.info(f"Whisper 模型載入完成。 Device: {whisper_model.device}")
 
     except Exception as e:
