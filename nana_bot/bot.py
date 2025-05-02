@@ -854,28 +854,32 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
 
 def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
-
     if original_sr == target_sr:
         return pcm_data
 
     try:
-
+        # 將 bytes 轉為 int16 Numpy 陣列
         audio_np = np.frombuffer(pcm_data, dtype=np.int16)
+        # 若為雙聲道 PCM，轉換為單聲道音訊（平均左右聲道）
+        if audio_np.shape[0] % 2 == 0:
+            try:
+                audio_np_stereo = audio_np.reshape(-1, 2)
+                audio_np_mono = (audio_np_stereo.astype(np.int32).sum(axis=1) // 2).astype(np.int16)
+            except Exception as e:
+                audio_np_mono = audio_np  # 若 reshape 失敗，維持原樣本（當作單聲道）
+        else:
+            audio_np_mono = audio_np
 
-        audio_tensor = torch.from_numpy(audio_np.astype(np.float32) / 32768.0).unsqueeze(0)
-
-
+        # 轉換為 float 張量並重取樣至 target_sr
+        audio_tensor = torch.from_numpy(audio_np_mono.astype(np.float32) / 32768.0).unsqueeze(0)
         resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
         resampled_tensor = resampler(audio_tensor)
-
-
+        # 將 float 張量轉回 int16 bytes
         resampled_np = (resampled_tensor.squeeze(0).numpy() * 32768.0).astype(np.int16)
-
         return resampled_np.tobytes()
     except Exception as e:
         logger.error(f"[Resample] 音訊重取樣失敗 from {original_sr} to {target_sr}: {e}")
         return pcm_data
-
 
 # Modified signature to accept loop
 def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel, loop: asyncio.AbstractEventLoop):
@@ -983,13 +987,14 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         if user_id in audio_buffers: del audio_buffers[user_id] # Ensure cleanup even on error
 
 
-async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member: discord.Member, channel: discord.TextChannel):
+async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, 
+                                    member: discord.Member, channel: discord.TextChannel):
     """
     在背景執行 Whisper 辨識。
 
     Args:
         audio_bytes (bytes): 完整的 PCM 語音片段 (int16).
-        sample_rate (int): 音訊的取樣率 (Should be 48000 from the buffer).
+        sample_rate (int): 音訊的取樣率 (應為 48000，稍後會重取樣至 16000).
         member (discord.Member): 說話的使用者 (可能為 None).
         channel (discord.TextChannel): 文字頻道。
     """
@@ -998,73 +1003,78 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member
         logger.warning("[Whisper] Received transcription task with member=None, skipping.")
         return
     if not whisper_model:
-         logger.error("[Whisper] Whisper model not loaded. Cannot transcribe.")
-         return
+        logger.error("[Whisper] Whisper model not loaded. Cannot transcribe.")
+        return
 
     try:
         start_time = time.time()
         logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes 音訊 (SR: {sample_rate})...")
 
-        # --- DEBUG: Save audio chunk being sent to Whisper ---
+        # 確保音訊為 16kHz 單聲道後再進行辨識
+        target_sr = 16000
+        if sample_rate != target_sr:
+            original_sr = sample_rate
+            resampled_pcm = resample_audio(audio_bytes, original_sr, target_sr)
+            if not resampled_pcm:  # 重取樣失敗或無音訊
+                logger.error(f"[Whisper] 音訊重取樣至 {target_sr}Hz 失敗，無法進行語音辨識")
+                return
+            audio_bytes = resampled_pcm
+            sample_rate = target_sr
+            logger.debug(f"[Whisper] 已將音訊從 {original_sr}Hz 重取樣為 {target_sr}Hz (單聲道)")
+
+        # --- DEBUG: 將傳入 Whisper 的音訊片段存檔 ---
         try:
             debug_audio_dir = "whisper_debug_audio"
             os.makedirs(debug_audio_dir, exist_ok=True)
             debug_filename = os.path.join(debug_audio_dir, f"input_{member.id}_{uuid.uuid4()}.wav")
             with wave.open(debug_filename, 'wb') as wf:
-                wf.setnchannels(1)  # Mono
-                wf.setsampwidth(2)  # 16-bit -> 2 bytes per sample
-                wf.setframerate(sample_rate) # Use the original sample rate (48kHz)
+                wf.setnchannels(1)      # 單聲道
+                wf.setsampwidth(2)      # 16-bit 音訊，每樣本2 bytes
+                wf.setframerate(sample_rate)  # 使用當前音訊取樣率 (如 16000Hz)
                 wf.writeframes(audio_bytes)
             logger.info(f"[Whisper Debug] Saved audio chunk for {member.display_name} to {debug_filename}")
         except Exception as save_e:
             logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
         # --- End DEBUG ---
 
-        # 1. Convert bytes to NumPy array (int16)
+        # 1. 將 bytes 轉為 NumPy int16 陣列
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-        # 2. Convert to float32, required by Whisper model
+        # 2. 轉為 float32 陣列（Whisper 模型需要 float32 輸入）
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
-        # --- DEBUG: Check audio array stats ---
+        # （Debug訊息：輸出音訊數據統計資訊）
         if len(audio_float32) > 0:
-             logger.debug(f"[Whisper Debug] Audio float32 stats: min={np.min(audio_float32):.4f}, max={np.max(audio_float32):.4f}, mean={np.mean(audio_float32):.4f}")
+            logger.debug(f"[Whisper Debug] Audio float32 stats: min={np.min(audio_float32):.4f}, "
+                         f"max={np.max(audio_float32):.4f}, mean={np.mean(audio_float32):.4f}")
         else:
-             logger.debug("[Whisper Debug] Audio float32 array is empty.")
-        # --- End DEBUG ---
+            logger.debug("[Whisper Debug] Audio float32 array is empty.")
 
-
-        # 3. Perform transcription in executor
+        # 3. 使用執行緒池執行 Whisper 辨識
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None, # Use default ThreadPoolExecutor
+            None,
             functools.partial(
                 whisper_model.transcribe,
                 audio_float32,
                 language=STT_LANGUAGE,
                 fp16=torch.cuda.is_available(),
-                # Consider adding/tuning these if needed:
-                # no_speech_threshold=0.6, # Default: 0.6; lower = more sensitive to non-speech
-                # logprob_threshold=-1.0, # Default: -1.0; lower = allows lower probability sequences
             )
         )
-        # Ensure result is a dictionary before accessing 'text'
+        # 確保 result 為字典後再取出文字結果
         text = ""
         if isinstance(result, dict):
             text = result.get("text", "").strip()
         else:
             logger.warning(f"[Whisper] Unexpected result type from transcribe: {type(result)}")
 
-
         duration = time.time() - start_time
-        # Log the result here *after* getting it
         logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s。結果: '{text}'")
 
-        # 4. Pass result (even if empty) to handler
+        # 4. 將結果傳給後續處理函式（即使文字為空字串也觸發，以便後續處理邏輯一致）
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
         logger.exception(f"[Whisper] 處理來自 {member.display_name} 的音訊時發生錯誤: {e}")
-
 
 
 
