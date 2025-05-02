@@ -57,16 +57,16 @@ import whisper
 import tempfile
 import edge_tts
 import functools
-import wave # Added for saving WAV
-import uuid # Added for unique filenames
+import wave
+import uuid
 
 
 whisper_model = None
 vad_model = None
 
 VAD_SAMPLE_RATE = 16000
-VAD_EXPECTED_SAMPLES = 512 # VAD model expects this many samples at 16kHz
-VAD_CHUNK_SIZE_BYTES = VAD_EXPECTED_SAMPLES * 2 # 16-bit audio = 2 bytes/sample
+VAD_EXPECTED_SAMPLES = 512
+VAD_CHUNK_SIZE_BYTES = VAD_EXPECTED_SAMPLES * 2
 VAD_THRESHOLD = 0.5
 VAD_MIN_SILENCE_DURATION_MS = 700
 VAD_SPEECH_PAD_MS = 200
@@ -707,21 +707,15 @@ async def on_member_remove(member):
 
 async def handle_stt_result(text: str, user: discord.Member, channel: discord.TextChannel):
 
-    logger.info(f'已辨識文字:{user.display_name}說{text}') # Log includes the potentially empty text
+    logger.info(f'已辨識文字:{user.display_name}說{text}')
     if not text:
-        # Optionally, inform the user that nothing was transcribed
-        # try:
-        #     await channel.send(f"🎤 {user.display_name}，我好像沒聽清楚你說了什麼。")
-        # except discord.HTTPException:
-        #     pass
-        return # Stop processing if text is empty
+        return
     if user is None:
         logger.warning("[STT_Result] Received result with user=None, skipping.")
         return
 
     logger.info(f"[STT_Result] 來自 {user.display_name} (ID: {user.id}) 的辨識結果: '{text}'")
     try:
-        # Report the transcription result (even if it was empty before the 'if not text' check)
         await channel.send(f"🔊 {user.display_name} 說：「{text}」")
     except discord.HTTPException as e:
         logger.error(f"[STT_Result] 發送辨識結果訊息失敗: {e}")
@@ -858,30 +852,25 @@ def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
         return pcm_data
 
     try:
-        # 將 bytes 轉為 int16 Numpy 陣列
         audio_np = np.frombuffer(pcm_data, dtype=np.int16)
-        # 若為雙聲道 PCM，轉換為單聲道音訊（平均左右聲道）
         if audio_np.shape[0] % 2 == 0:
             try:
                 audio_np_stereo = audio_np.reshape(-1, 2)
                 audio_np_mono = (audio_np_stereo.astype(np.int32).sum(axis=1) // 2).astype(np.int16)
             except Exception as e:
-                audio_np_mono = audio_np  # 若 reshape 失敗，維持原樣本（當作單聲道）
+                audio_np_mono = audio_np
         else:
             audio_np_mono = audio_np
 
-        # 轉換為 float 張量並重取樣至 target_sr
         audio_tensor = torch.from_numpy(audio_np_mono.astype(np.float32) / 32768.0).unsqueeze(0)
         resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
         resampled_tensor = resampler(audio_tensor)
-        # 將 float 張量轉回 int16 bytes
         resampled_np = (resampled_tensor.squeeze(0).numpy() * 32768.0).astype(np.int16)
         return resampled_np.tobytes()
     except Exception as e:
         logger.error(f"[Resample] 音訊重取樣失敗 from {original_sr} to {target_sr}: {e}")
         return pcm_data
 
-# Modified signature to accept loop
 def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel, loop: asyncio.AbstractEventLoop):
     """
     處理從 Discord 收到的音訊數據塊 (使用 Silero VAD)。
@@ -902,23 +891,20 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         return
 
     user_id = member.id
-    pcm_data = audio_data.pcm # This is the original 48kHz data
+    pcm_data = audio_data.pcm
     original_sr = 48000
 
     try:
-        # 1. Resample to VAD rate (16kHz)
         resampled_pcm = resample_audio(pcm_data, original_sr, VAD_SAMPLE_RATE)
         if not resampled_pcm:
             return
 
-        # 2. Convert resampled data to float32 tensor for VAD
         audio_int16 = np.frombuffer(resampled_pcm, dtype=np.int16)
         audio_float32 = torch.from_numpy(audio_int16.astype(np.float32) / 32768.0)
 
-        # 3. Pad or truncate tensor to EXACTLY VAD_EXPECTED_SAMPLES
         actual_samples = audio_float32.shape[0]
         if actual_samples == 0:
-            return # Ignore empty chunks
+            return
 
         if actual_samples > VAD_EXPECTED_SAMPLES:
             processed_audio_tensor = audio_float32[:VAD_EXPECTED_SAMPLES]
@@ -929,36 +915,28 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         else:
             processed_audio_tensor = audio_float32
 
-        # Ensure tensor is on the correct device (if VAD model uses GPU)
-        # processed_audio_tensor = processed_audio_tensor.to(vad_model.device) # Uncomment if vad_model is on GPU
 
-        # 4. Use VAD model
         speech_prob = vad_model(processed_audio_tensor, VAD_SAMPLE_RATE).item()
         is_speech_now = speech_prob >= VAD_THRESHOLD
 
-        # 5. Update user state and buffer (using the ORIGINAL pcm_data)
         user_state = audio_buffers[user_id]
         current_time = time.time()
 
         if is_speech_now:
-            # logger.debug(f"[VAD] Speech detected for {member.display_name} (Prob: {speech_prob:.2f})")
-            user_state['buffer'].extend(pcm_data) # Buffer ORIGINAL 48kHz data
+            user_state['buffer'].extend(pcm_data)
             user_state['last_speech_time'] = current_time
             user_state['is_speaking'] = True
         else:
-            # logger.debug(f"[VAD] Silence detected for {member.display_name} (Prob: {speech_prob:.2f})")
             if user_state['is_speaking']:
                 silence_duration = (current_time - user_state['last_speech_time']) * 1000
                 if silence_duration >= VAD_MIN_SILENCE_DURATION_MS:
                     logger.info(f"[VAD] End of speech detected for {member.display_name} after {silence_duration:.0f}ms silence.")
                     user_state['is_speaking'] = False
                     full_speech_buffer = user_state['buffer']
-                    user_state['buffer'] = bytearray() # Clear buffer
+                    user_state['buffer'] = bytearray()
 
-                    # Trigger Whisper if buffer has enough ORIGINAL data
-                    if len(full_speech_buffer) > original_sr * 2 * 0.2: # Check against original_sr
+                    if len(full_speech_buffer) > original_sr * 2 * 0.5:
                         logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes)")
-                        # --- Use the passed loop to create the task ---
                         if loop:
                             loop.create_task(
                                 run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
@@ -968,23 +946,20 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                     else:
                          logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
                 else:
-                    # Short silence, keep buffering ORIGINAL data
                     user_state['buffer'].extend(pcm_data)
-            # else: Still silent, do nothing with buffer
 
     except Exception as e:
-        # Check specifically for the ValueError related to samples if it recurs
         processed_audio_tensor_shape = 'N/A'
         try:
             processed_audio_tensor_shape = processed_audio_tensor.shape
         except NameError:
-            pass # Variable might not be defined if error happened earlier
+            pass
 
         if "Provided number of samples is" in str(e):
              logger.error(f"[VAD/AudioProc] VAD input size error for {member.display_name}. Input shape attempted: {processed_audio_tensor_shape}. Error: {e}")
         else:
              logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
-        if user_id in audio_buffers: del audio_buffers[user_id] # Ensure cleanup even on error
+        if user_id in audio_buffers: del audio_buffers[user_id]
 
 
 async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, 
@@ -1010,46 +985,39 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
         start_time = time.time()
         logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes 音訊 (SR: {sample_rate})...")
 
-        # 確保音訊為 16kHz 單聲道後再進行辨識
         target_sr = 16000
         if sample_rate != target_sr:
             original_sr = sample_rate
             resampled_pcm = resample_audio(audio_bytes, original_sr, target_sr)
-            if not resampled_pcm:  # 重取樣失敗或無音訊
+            if not resampled_pcm:
                 logger.error(f"[Whisper] 音訊重取樣至 {target_sr}Hz 失敗，無法進行語音辨識")
                 return
             audio_bytes = resampled_pcm
             sample_rate = target_sr
             logger.debug(f"[Whisper] 已將音訊從 {original_sr}Hz 重取樣為 {target_sr}Hz (單聲道)")
 
-        # --- DEBUG: 將傳入 Whisper 的音訊片段存檔 ---
         try:
             debug_audio_dir = "whisper_debug_audio"
             os.makedirs(debug_audio_dir, exist_ok=True)
             debug_filename = os.path.join(debug_audio_dir, f"input_{member.id}_{uuid.uuid4()}.wav")
             with wave.open(debug_filename, 'wb') as wf:
-                wf.setnchannels(1)      # 單聲道
-                wf.setsampwidth(2)      # 16-bit 音訊，每樣本2 bytes
-                wf.setframerate(sample_rate)  # 使用當前音訊取樣率 (如 16000Hz)
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
                 wf.writeframes(audio_bytes)
             logger.info(f"[Whisper Debug] Saved audio chunk for {member.display_name} to {debug_filename}")
         except Exception as save_e:
             logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
-        # --- End DEBUG ---
 
-        # 1. 將 bytes 轉為 NumPy int16 陣列
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
-        # 2. 轉為 float32 陣列（Whisper 模型需要 float32 輸入）
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
-        # （Debug訊息：輸出音訊數據統計資訊）
         if len(audio_float32) > 0:
             logger.debug(f"[Whisper Debug] Audio float32 stats: min={np.min(audio_float32):.4f}, "
                          f"max={np.max(audio_float32):.4f}, mean={np.mean(audio_float32):.4f}")
         else:
             logger.debug("[Whisper Debug] Audio float32 array is empty.")
 
-        # 3. 使用執行緒池執行 Whisper 辨識
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
@@ -1060,7 +1028,6 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
                 fp16=torch.cuda.is_available(),
             )
         )
-        # 確保 result 為字典後再取出文字結果
         text = ""
         if isinstance(result, dict):
             text = result.get("text", "").strip()
@@ -1070,7 +1037,6 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
         duration = time.time() - start_time
         logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s。結果: '{text}'")
 
-        # 4. 將結果傳給後續處理函式（即使文字為空字串也觸發，以便後續處理邏輯一致）
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
@@ -1088,7 +1054,6 @@ async def join(interaction: discord.Interaction):
 
     await interaction.response.defer(ephemeral=True)
 
-    # --- Get the main event loop ---
     main_loop = asyncio.get_running_loop()
 
     channel = interaction.user.voice.channel
@@ -1166,8 +1131,6 @@ async def join(interaction: discord.Interaction):
         return
 
 
-    # --- Create Sink Callback with Loop ---
-    # Pass the main_loop to the partial function
     callback = functools.partial(process_audio_chunk, guild_id=guild_id, channel=interaction.channel, loop=main_loop)
     sink = BasicSink(callback)
 
@@ -1179,12 +1142,9 @@ async def join(interaction: discord.Interaction):
         await interaction.followup.send(f"✅ 已在 <#{channel.id}> 開始監聽！", ephemeral=True)
     except Exception as e:
          logger.exception(f"啟動監聽失敗 (伺服器: {guild_id}): {e}")
-         # Check for specific webhook error just in case defer wasn't enough or another issue occurred
          if isinstance(e, discord.NotFound) and 'Unknown Webhook' in str(e):
               logger.error(f"Webhook error during followup despite defer (Server: {guild_id}). Interaction might have expired.")
-              # Cannot send followup here either
          else:
-            # Use try-except for the followup just in case the interaction expired between defer and here
             try:
                 await interaction.followup.send("❌ 啟動監聽失敗。", ephemeral=True)
             except discord.NotFound:
@@ -1201,7 +1161,7 @@ async def join(interaction: discord.Interaction):
              finally:
                  if guild_id in voice_clients:
                      del voice_clients[guild_id]
-         clear_guild_stt_state(guild_id) # Ensure state is cleared on listen failure too
+         clear_guild_stt_state(guild_id)
 
 
 @bot.tree.command(name='leave')
@@ -1918,10 +1878,10 @@ def bot_run():
 
         logger.info("VAD 模型載入完成。")
 
-        logger.info("正在載入 Whisper 模型 (base)...") # Consider changing model here if needed
+        logger.info("正在載入 Whisper 模型 (medium)...")
 
 
-        whisper_model = whisper.load_model("base") # Change "base" to "small" or "medium" for better accuracy
+        whisper_model = whisper.load_model("medium")
         logger.info(f"Whisper 模型載入完成。 Device: {whisper_model.device}")
 
     except Exception as e:
