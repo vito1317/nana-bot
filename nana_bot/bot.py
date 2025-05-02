@@ -63,6 +63,8 @@ whisper_model = None
 vad_model = None
 
 VAD_SAMPLE_RATE = 16000
+VAD_EXPECTED_SAMPLES = 512 # VAD model expects this many samples at 16kHz
+VAD_CHUNK_SIZE_BYTES = VAD_EXPECTED_SAMPLES * 2 # 16-bit audio = 2 bytes/sample
 VAD_THRESHOLD = 0.5
 VAD_MIN_SILENCE_DURATION_MS = 700
 VAD_SPEECH_PAD_MS = 200
@@ -844,7 +846,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
 
 def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
-    """將 PCM 音訊數據從原始取樣率重取樣到目標取樣率"""
+
     if original_sr == target_sr:
         return pcm_data
 
@@ -879,61 +881,82 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
         return
 
     user_id = member.id
-    pcm_data = audio_data.pcm
-    original_sr = 48000 # Assume Discord standard sample rate
+    pcm_data = audio_data.pcm # This is the original 48kHz data
+    original_sr = 48000
 
     try:
-
+        # 1. Resample to VAD rate (16kHz)
         resampled_pcm = resample_audio(pcm_data, original_sr, VAD_SAMPLE_RATE)
         if not resampled_pcm:
             return
 
-
+        # 2. Convert resampled data to float32 tensor for VAD
         audio_int16 = np.frombuffer(resampled_pcm, dtype=np.int16)
         audio_float32 = torch.from_numpy(audio_int16.astype(np.float32) / 32768.0)
 
+        # 3. Pad or truncate tensor to EXACTLY VAD_EXPECTED_SAMPLES
+        actual_samples = audio_float32.shape[0]
+        if actual_samples == 0:
+            return # Ignore empty chunks
 
+        if actual_samples > VAD_EXPECTED_SAMPLES:
+            processed_audio_tensor = audio_float32[:VAD_EXPECTED_SAMPLES]
+        elif actual_samples < VAD_EXPECTED_SAMPLES:
+            padding_size = VAD_EXPECTED_SAMPLES - actual_samples
+            padding = torch.zeros(padding_size)
+            processed_audio_tensor = torch.cat((audio_float32, padding))
+        else:
+            processed_audio_tensor = audio_float32
 
-        speech_prob = vad_model(audio_float32, VAD_SAMPLE_RATE).item()
+        # Ensure tensor is on the correct device (if VAD model uses GPU)
+        # processed_audio_tensor = processed_audio_tensor.to(vad_model.device) # Uncomment if vad_model is on GPU
+
+        # 4. Use VAD model
+        # The model expects batch dimension, but we process one chunk at a time
+        # The error indicates it might internally handle batches? Let's try without explicit batch dim first.
+        # If error persists, uncomment the line below.
+        # processed_audio_tensor = processed_audio_tensor.unsqueeze(0) # Add batch dimension if needed
+        speech_prob = vad_model(processed_audio_tensor, VAD_SAMPLE_RATE).item()
         is_speech_now = speech_prob >= VAD_THRESHOLD
 
-
+        # 5. Update user state and buffer (using the ORIGINAL pcm_data)
         user_state = audio_buffers[user_id]
         current_time = time.time()
 
         if is_speech_now:
-
-            user_state['buffer'].extend(pcm_data)
+            # logger.debug(f"[VAD] Speech detected for {member.display_name} (Prob: {speech_prob:.2f})")
+            user_state['buffer'].extend(pcm_data) # Buffer ORIGINAL 48kHz data
             user_state['last_speech_time'] = current_time
             user_state['is_speaking'] = True
         else:
-
+            # logger.debug(f"[VAD] Silence detected for {member.display_name} (Prob: {speech_prob:.2f})")
             if user_state['is_speaking']:
-
                 silence_duration = (current_time - user_state['last_speech_time']) * 1000
                 if silence_duration >= VAD_MIN_SILENCE_DURATION_MS:
-
                     logger.info(f"[VAD] End of speech detected for {member.display_name} after {silence_duration:.0f}ms silence.")
                     user_state['is_speaking'] = False
                     full_speech_buffer = user_state['buffer']
-                    user_state['buffer'] = bytearray()
+                    user_state['buffer'] = bytearray() # Clear buffer
 
-
-                    if len(full_speech_buffer) > original_sr * 2 * 0.2:
+                    # Trigger Whisper if buffer has enough ORIGINAL data
+                    if len(full_speech_buffer) > original_sr * 2 * 0.2: # Check against original_sr
                         logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes)")
-
                         asyncio.create_task(
                             run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
                         )
                     else:
                          logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
                 else:
-
+                    # Short silence, keep buffering ORIGINAL data
                     user_state['buffer'].extend(pcm_data)
-
+            # else: Still silent, do nothing with buffer
 
     except Exception as e:
-        logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
+        # Check specifically for the ValueError related to samples if it recurs
+        if "Provided number of samples is" in str(e):
+             logger.error(f"[VAD/AudioProc] VAD input size error for {member.display_name}. Input shape attempted: {processed_audio_tensor.shape}. Error: {e}")
+        else:
+             logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
         if user_id in audio_buffers: del audio_buffers[user_id]
 
 
@@ -992,7 +1015,7 @@ async def join(interaction: discord.Interaction):
         await interaction.response.send_message("❌ 你需要先加入一個語音頻道！", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True) # Defer early
+    await interaction.response.defer(ephemeral=True)
 
     channel = interaction.user.voice.channel
     guild_id = interaction.guild.id
@@ -1022,14 +1045,14 @@ async def join(interaction: discord.Interaction):
                 logger.info(f"已成功移動至頻道 {channel.name}")
             except Exception as e:
                 logger.exception(f"移動語音頻道失敗: {e}")
-                await interaction.followup.send("❌ 移動語音頻道失敗。", ephemeral=True) # Use followup
+                await interaction.followup.send("❌ 移動語音頻道失敗。", ephemeral=True)
                 return
         elif not vc.is_listening():
              logger.info(f"機器人已在頻道 {channel.name} 但未監聽，將重新啟動監聽...")
              clear_guild_stt_state(guild_id)
 
         else:
-             await interaction.followup.send("⚠️ 我已經在語音頻道中並且正在監聽。", ephemeral=True) # Use followup
+             await interaction.followup.send("⚠️ 我已經在語音頻道中並且正在監聽。", ephemeral=True)
              return
     else:
         logger.info(f"收到來自 {interaction.user.name} 的加入請求 (頻道: {channel.name}, 伺服器: {guild_id})")
@@ -1042,19 +1065,19 @@ async def join(interaction: discord.Interaction):
             logger.info(f"成功加入語音頻道: {channel.name} (伺服器: {guild_id})")
         except discord.ClientException as e:
             logger.error(f"加入語音頻道失敗: {e}")
-            await interaction.followup.send(f"❌ 加入語音頻道失敗: {e}", ephemeral=True) # Use followup
+            await interaction.followup.send(f"❌ 加入語音頻道失敗: {e}", ephemeral=True)
             if guild_id in voice_clients: del voice_clients[guild_id]
             clear_guild_stt_state(guild_id)
             return
         except asyncio.TimeoutError:
              logger.error(f"加入語音頻道超時 (伺服器: {guild_id})")
-             await interaction.followup.send("❌ 加入語音頻道超時。", ephemeral=True) # Use followup
+             await interaction.followup.send("❌ 加入語音頻道超時。", ephemeral=True)
              if guild_id in voice_clients: del voice_clients[guild_id]
              clear_guild_stt_state(guild_id)
              return
         except Exception as e:
              logger.exception(f"加入語音頻道時發生未知錯誤: {e}")
-             await interaction.followup.send("❌ 加入語音頻道時發生未知錯誤。", ephemeral=True) # Use followup
+             await interaction.followup.send("❌ 加入語音頻道時發生未知錯誤。", ephemeral=True)
              if guild_id in voice_clients: del voice_clients[guild_id]
              clear_guild_stt_state(guild_id)
              return
@@ -1063,7 +1086,7 @@ async def join(interaction: discord.Interaction):
     vc = voice_clients[guild_id]
     if not vc or not vc.is_connected():
         logger.error(f"嘗試啟動監聽時，VC 無效或未連接 (伺服器: {guild_id})")
-        await interaction.followup.send("❌ 啟動監聽失敗，語音連接無效。", ephemeral=True) # Use followup
+        await interaction.followup.send("❌ 啟動監聽失敗，語音連接無效。", ephemeral=True)
         if guild_id in voice_clients: del voice_clients[guild_id]
         clear_guild_stt_state(guild_id)
         return
@@ -1078,10 +1101,15 @@ async def join(interaction: discord.Interaction):
         listening_guilds[guild_id] = vc
         logger.info(f"已開始在頻道 {channel.name} 監聽 (伺服器: {guild_id})")
 
-        await interaction.followup.send(f"✅ 已在 <#{channel.id}> 開始監聽！", ephemeral=True) # Use followup
+        await interaction.followup.send(f"✅ 已在 <#{channel.id}> 開始監聽！", ephemeral=True)
     except Exception as e:
          logger.exception(f"啟動監聽失敗 (伺服器: {guild_id}): {e}")
-         await interaction.followup.send("❌ 啟動監聽失敗。", ephemeral=True) # Use followup
+         # Check for specific webhook error just in case defer wasn't enough or another issue occurred
+         if isinstance(e, discord.NotFound) and 'Unknown Webhook' in str(e):
+              logger.error(f"Webhook error during followup despite defer (Server: {guild_id}). Interaction might have expired.")
+              # Cannot send followup here either
+         else:
+              await interaction.followup.send("❌ 啟動監聽失敗。", ephemeral=True)
 
          if guild_id in voice_clients:
              try:
@@ -1089,7 +1117,7 @@ async def join(interaction: discord.Interaction):
              except Exception as disconnect_err:
                  logger.error(f"啟動監聽失敗後斷開連接時出錯: {disconnect_err}")
              finally:
-                 if guild_id in voice_clients: # Check again in case disconnect failed but key exists
+                 if guild_id in voice_clients:
                      del voice_clients[guild_id]
          clear_guild_stt_state(guild_id)
 
