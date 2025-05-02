@@ -57,28 +57,25 @@ import edge_tts
 import functools
 import io
 
+# --- Whisper/VAD Configuration ---
 whisper_model = None
 vad_model = None
-# --- Removed vad_utils ---
-# vad_utils = None
-# --- Declare unpacked functions as global ---
-get_speech_ts = None
-save_audio = None
-read_audio = None
-VADIterator = None
-collect_chunks = None
+# --- Restore vad_utils global variable ---
+vad_utils = None
 
-
-VAD_SAMPLE_RATE = 16000
+VAD_SAMPLE_RATE = 16000 # Silero VAD standard sample rate
 VAD_THRESHOLD = 0.5
-VAD_MIN_SILENCE_DURATION_MS = 700
-VAD_SPEECH_PAD_MS = 200
-DISCORD_SR = 48000
+VAD_MIN_SILENCE_DURATION_MS = 700 # End of speech after this silence
+VAD_SPEECH_PAD_MS = 200 # Pad audio before/after speech (not strictly needed with current buffer logic)
+DISCORD_SR = 48000 # Discord voice sample rate
 
+# Use defaultdict for audio buffers per user
 audio_buffers = defaultdict(lambda: {'buffer': bytearray(), 'last_speech_time': time.time(), 'is_speaking': False})
-listening_guilds: Dict[int, voice_recv.VoiceRecvClient] = {}
-voice_clients: Dict[int, discord.VoiceClient] = {}
 
+listening_guilds: Dict[int, voice_recv.VoiceRecvClient] = {}
+voice_clients: Dict[int, discord.VoiceClient] = {} # General VC tracking
+
+# --- Safety Settings for Generative AI ---
 safety_settings = {
     HarmCategory.HARM_CATEGORY_HATE_SPEECH:      HarmBlockThreshold.BLOCK_NONE,
     HarmCategory.HARM_CATEGORY_HARASSMENT:       HarmBlockThreshold.BLOCK_NONE,
@@ -86,10 +83,12 @@ safety_settings = {
     HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
 }
 
+# --- TTS/STT Configuration ---
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural"
 STT_ACTIVATION_WORD = bot_name
-STT_LANGUAGE = "zh"
+STT_LANGUAGE = "zh" # Whisper language code
 
+# --- Logging Setup ---
 logging.basicConfig(level=logging.INFO if not debug else logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
@@ -100,6 +99,7 @@ logger = logging.getLogger(__name__)
 discord_logger = logging.getLogger('discord')
 discord_logger.setLevel(logging.WARNING)
 
+# --- TTS Function ---
 async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = "TTS"):
     total_start = time.time()
     if not voice_client or not voice_client.is_connected():
@@ -193,11 +193,13 @@ async def play_tts(voice_client: discord.VoiceClient, text: str, context: str = 
             except Exception as final_e:
                  logger.error(f"[{context}][Finally] 清理未播放檔案時發生錯誤: {final_e}")
 
+# --- Utility Functions ---
 def get_current_time_utc8():
     utc8 = timezone(timedelta(hours=8))
     current_time = datetime.now(utc8)
     return current_time.strftime("%Y-%m-%d %H:%M:%S")
 
+# --- AI Model Initialization ---
 genai.configure(api_key=API_KEY)
 not_reviewed_role_id = not_reviewed_id
 try:
@@ -207,8 +209,9 @@ try:
     logger.info(f"成功初始化 GenerativeModel: {gemini_model}")
 except Exception as e:
     logger.critical(f"初始化 GenerativeModel 失敗: {e}")
-    model = None
+    model = None # Ensure model is None if init fails
 
+# --- Database Setup ---
 db_base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "databases")
 os.makedirs(db_base_path, exist_ok=True)
 
@@ -246,7 +249,7 @@ def init_db_for_guild(guild_id):
     def _init_single_db(db_path, tables_dict):
         conn = None
         try:
-            conn = sqlite3.connect(db_path, timeout=10)
+            conn = sqlite3.connect(db_path, timeout=10) # Added timeout
             cursor = conn.cursor()
             for table_name, table_schema in tables_dict.items():
                 cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({table_schema})")
@@ -266,6 +269,7 @@ def init_db_for_guild(guild_id):
     logger.info(f"伺服器 {guild_id} 的資料庫初始化完成。")
 
 
+# --- Scheduled Tasks ---
 @tasks.loop(hours=24)
 async def send_daily_message():
     logger.info("開始執行每日訊息任務...")
@@ -313,6 +317,7 @@ async def before_send_daily_message():
     logger.info(f"每日訊息任務將在 {wait_seconds:.0f} 秒後首次執行 (於 {next_run.strftime('%Y-%m-%d %H:%M:%S %Z%z')})")
     await asyncio.sleep(wait_seconds)
 
+# --- Bot Events ---
 @bot.event
 async def on_ready():
     logger.info(f"以 {bot.user.name} (ID: {bot.user.id}) 登入")
@@ -361,7 +366,7 @@ async def on_ready():
 @bot.event
 async def on_guild_join(guild):
     logger.info(f"機器人加入新伺服器: {guild.name} (ID: {guild.id})")
-    init_db_for_guild(guild.id)
+    init_db_for_guild(guild.id) # Initialize DB for the new guild
     if guild.id not in servers:
         logger.warning(f"伺服器 {guild.id} 不在設定檔 'servers' 列表中。可能需要手動設定。")
 
@@ -410,7 +415,7 @@ async def on_member_join(member):
         current_newcomer_channel_id = newcomer_channel_id[server_index]
     except IndexError:
         logger.error(f"Configuration index {server_index} out of range for server ID {guild.id}. Check config lists length.")
-        return
+        return # Stop if configuration is missing
 
     analytics_db_path = get_db_path(guild.id, 'analytics')
     conn_user_join = None
@@ -478,15 +483,15 @@ async def on_member_join(member):
     welcome_channel = bot.get_channel(current_welcome_channel_id)
     if not welcome_channel:
         logger.warning(f"Welcome channel {current_welcome_channel_id} not found for server {guild.id}. Cannot send welcome message.")
-        return
+        return # Don't proceed if channel is missing
 
     if not welcome_channel.permissions_for(guild.me).send_messages:
         logger.error(f"Bot does not have permission to send messages in the welcome channel {current_welcome_channel_id} for guild {guild.id}.")
-        return
+        return # Don't proceed without permission
 
     newcomer_channel_mention = f"<#{current_newcomer_channel_id}>" if bot.get_channel(current_newcomer_channel_id) else f"頻道 ID {current_newcomer_channel_id} (未找到)"
 
-    if model:
+    if model: # Use AI welcome message if model is available
         try:
             welcome_prompt = [
                 f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
@@ -494,15 +499,15 @@ async def on_member_join(member):
                 f"第二步是tag <#{current_newcomer_channel_id}> 傳送這則訊息進去，這是新人審核頻道，讓使用者進行新人審核，請務必引導使用者講述自己的病症與情況，而不是只傳送 <#{current_newcomer_channel_id}>，請注意，請傳送完整的訊息，包誇<>也需要傳送，同時也請不要回覆這則訊息，請勿傳送指令或命令使用者，也並不是請你去示範，也不是請他跟你分享要聊什麼，也請不要請新人(使用者)與您分享相關訊息",
                 f"新人審核格式包誇(```{review_format}```)，example(僅為範例，請勿照抄):(你好！歡迎加入{member.guild.name}，很高興認識你！我叫{bot_name}，是你們的心理支持輔助機器人。如果你有任何情感困擾、生活問題，或是需要一點建議，都歡迎在審核後找我聊聊。我會盡力以溫暖、理解的方式傾聽，並給你專業的建議和支持。但在你跟我聊天以前，需要請你先到 <#{current_newcomer_channel_id}> 填寫以下資訊，方便我更好的為你服務！ ```{review_format}```)請記住務必傳送>> ```{review_format}```和<#{current_newcomer_channel_id}> <<",
             ]
-            async with welcome_channel.typing():
+            async with welcome_channel.typing(): # Show typing indicator
                 responses = await model.generate_content_async(
                     welcome_prompt,
-                    safety_settings=safety_settings
+                    safety_settings=safety_settings # Apply safety settings
                 )
             if responses.candidates and responses.text:
                 embed = discord.Embed(
                     title=f"🎉 歡迎 {member.display_name} 加入 {guild.name}！",
-                    description=responses.text,
+                    description=responses.text, # Use AI generated text
                     color=discord.Color.blue()
                 )
                 embed.set_thumbnail(url=member.display_avatar.url)
@@ -562,17 +567,17 @@ async def on_member_remove(member):
         current_remove_channel_id = member_remove_channel_id[server_index]
     except IndexError:
         logger.error(f"Configuration index {server_index} out of range for member_remove_channel_id (Guild ID: {guild.id}).")
-        return
+        return # Stop if config is missing
 
     remove_channel = bot.get_channel(current_remove_channel_id)
     if not remove_channel:
         logger.warning(f"Member remove channel {current_remove_channel_id} not found for server {guild.id}")
     elif remove_channel and not remove_channel.permissions_for(guild.me).send_messages:
         logger.error(f"Bot does not have permission to send messages in the member remove channel {current_remove_channel_id} for guild {guild.id}.")
-        remove_channel = None
+        remove_channel = None # Treat as not found if no permission
 
     try:
-        leave_time_utc8 = datetime.now(timezone(timedelta(hours=8)))
+        leave_time_utc8 = datetime.now(timezone(timedelta(hours=8))) # Get current time in UTC+8
         formatted_time = leave_time_utc8.strftime("%Y-%m-%d %H:%M:%S")
 
         if remove_channel:
@@ -587,7 +592,7 @@ async def on_member_remove(member):
             try:
                 await remove_channel.send(embed=embed)
                 logger.info(f"Sent member remove message for {member.id} to channel {current_remove_channel_id}")
-            except discord.Forbidden:
+            except discord.Forbidden: # Should be caught by earlier check, but as safety
                 logger.error(f"Permission error: Cannot send message to member remove channel {current_remove_channel_id}.")
             except discord.DiscordException as send_error:
                 logger.error(f"Failed to send member remove message to channel {current_remove_channel_id}: {send_error}")
@@ -612,7 +617,7 @@ async def on_member_remove(member):
                 join_date_utc = None
                 days_in_server = "未知"
                 avg_messages_per_day = "未知"
-                join_date_local_str = "未知"
+                join_date_local_str = "未知" # Default value
 
                 if join_date_str:
                     try:
@@ -683,6 +688,8 @@ async def on_member_remove(member):
         logger.exception(f"Unexpected error during on_member_remove for {member.name} (ID: {member.id}) in guild {guild.id}: {e}")
 
 
+# --- STT/VAD Handling ---
+
 async def handle_stt_result(text: str, user: discord.Member, channel: discord.TextChannel):
     logger.info(f'已辨識文字: {user.display_name} 說 "{text}"')
     if not text:
@@ -705,7 +712,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
         return
 
     query = text.lower().split(STT_ACTIVATION_WORD.lower(), 1)[1].strip()
-    vc = voice_clients.get(guild_id)
+    vc = voice_clients.get(guild_id) # Get the current voice client for this guild
 
     if not vc or not vc.is_connected():
          logger.error(f"[STT_Result] 無法處理 AI 請求，找不到連接的 VC (Guild: {guild_id})")
@@ -799,7 +806,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
                 {"role": "user",  "parts": [{"text": initial_prompt}]},
                 {"role": "model", "parts": [{"text": initial_response}]},
             ]
-            for db_user, db_content in chat_history_raw:
+            for db_user, db_content in chat_history_raw: # Unpack directly
                 if not db_content:
                     logger.warning(f"Skipping empty message from history (User: {db_user}, Guild: {guild_id})")
                     continue
@@ -817,9 +824,9 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
             await play_tts(vc, reply, context="STT AI Response")
 
-            store_message(user.display_name, query, timestamp)
+            store_message(user.display_name, query, timestamp) # Store user query
             if reply != "抱歉，我暫時無法回答。":
-                store_message(bot_name, reply, get_current_time_utc8())
+                store_message(bot_name, reply, get_current_time_utc8()) # Store bot reply
 
         except genai.types.BlockedPromptException as e:
              logger.warning(f"[STT_Result] AI Prompt blocked for user {user.id} (Guild {guild_id}): {e}")
@@ -833,6 +840,7 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
 
 def convert_and_resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> Optional[torch.Tensor]:
+    """Converts stereo PCM bytes to mono float32 tensor and resamples."""
     try:
         audio_np_stereo = np.frombuffer(pcm_data, dtype=np.int16)
 
@@ -862,18 +870,19 @@ def convert_and_resample_audio(pcm_data: bytes, original_sr: int, target_sr: int
 
 
 def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel):
-    # --- Use global VAD model and unpacked functions directly ---
-    global audio_buffers, vad_model, get_speech_ts
+    """Processes an incoming audio chunk, performs VAD, and manages buffers."""
+    # --- Use global VAD model and utils object ---
+    global audio_buffers, vad_model, vad_utils
 
     if member is None or member.bot:
         return
-    # --- Check if vad_model and the necessary function get_speech_ts are loaded ---
-    if not vad_model or not get_speech_ts:
-        logger.error("[VAD] VAD model or get_speech_ts function not loaded. Cannot process audio chunk.")
+    # --- Check if vad_model and utils object are loaded ---
+    if not vad_model or not vad_utils:
+        logger.error("[VAD] VAD model or utils not loaded. Cannot process audio chunk.")
         return
 
     user_id = member.id
-    pcm_data = audio_data.pcm
+    pcm_data = audio_data.pcm # 48kHz, 16-bit, stereo PCM bytes
     original_sr = DISCORD_SR
 
     try:
@@ -881,42 +890,45 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
 
         if resampled_mono_tensor_16k is None:
              logger.warning(f"[VAD] Skipping VAD check for user {member.display_name} due to conversion/resample error.")
-             return
+             return # Don't proceed if conversion failed
 
-        # --- Use the global get_speech_ts directly ---
-        speech_timestamps = get_speech_ts(resampled_mono_tensor_16k, vad_model, threshold=VAD_THRESHOLD, sampling_rate=VAD_SAMPLE_RATE)
+        # --- Use vad_utils.get_speech_ts ---
+        speech_timestamps = vad_utils.get_speech_ts(resampled_mono_tensor_16k, vad_model, threshold=VAD_THRESHOLD, sampling_rate=VAD_SAMPLE_RATE)
         is_speech_now = len(speech_timestamps) > 0
 
+        # --- Convert 16kHz tensor to bytes for buffer ---
         pcm_data_mono_16k_bytes = b''
-        if resampled_mono_tensor_16k.numel() > 0:
+        if resampled_mono_tensor_16k.numel() > 0: # Check if tensor is not empty
             try:
                 audio_int16_16k = (resampled_mono_tensor_16k.numpy() * 32768.0).astype(np.int16)
                 pcm_data_mono_16k_bytes = audio_int16_16k.tobytes()
             except Exception as conversion_e:
                  logger.error(f"[VAD/Buffer] Error converting 16kHz tensor to bytes for user {member.display_name}: {conversion_e}")
-                 return
-
+                 return # Don't proceed if conversion fails
 
         user_state = audio_buffers[user_id]
         current_time = time.time()
 
         if is_speech_now:
+            # --- Append 16kHz bytes ---
             user_state['buffer'].extend(pcm_data_mono_16k_bytes)
             user_state['last_speech_time'] = current_time
             if not user_state['is_speaking']:
                 logger.debug(f"[VAD] Speech start detected for {member.display_name}")
                 user_state['is_speaking'] = True
-        else:
+        else: # Silence detected in this chunk
             if user_state['is_speaking']:
-                silence_duration = (current_time - user_state['last_speech_time']) * 1000
+                silence_duration = (current_time - user_state['last_speech_time']) * 1000 # ms
                 if silence_duration >= VAD_MIN_SILENCE_DURATION_MS:
                     logger.info(f"[VAD] End of speech detected for {member.display_name} after {silence_duration:.0f}ms silence.")
                     user_state['is_speaking'] = False
-                    full_speech_buffer = bytes(user_state['buffer'])
-                    user_state['buffer'] = bytearray()
+                    full_speech_buffer = bytes(user_state['buffer']) # Get copy of the buffered 16kHz bytes
+                    user_state['buffer'] = bytearray() # Clear buffer
 
-                    min_bytes_16k = int(VAD_SAMPLE_RATE * 2 * 0.2)
+                    # --- Check length based on 16kHz sample rate ---
+                    min_bytes_16k = int(VAD_SAMPLE_RATE * 2 * 0.2) # 0.2 seconds at 16kHz, 2 bytes/sample
                     if len(full_speech_buffer) > min_bytes_16k:
+                        # --- Pass VAD_SAMPLE_RATE (16000) to Whisper ---
                         logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes of {VAD_SAMPLE_RATE}Hz mono audio)")
                         asyncio.create_task(
                             run_whisper_transcription(full_speech_buffer, VAD_SAMPLE_RATE, member, channel)
@@ -924,6 +936,7 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
                     else:
                          logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes at 16kHz), skipping Whisper.")
                 else:
+                    # --- Append 16kHz bytes even during short silence ---
                     user_state['buffer'].extend(pcm_data_mono_16k_bytes)
 
     except Exception as e:
@@ -932,6 +945,7 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
 
 
 async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member: discord.Member, channel: discord.TextChannel):
+    """Transcribes the given audio bytes using Whisper."""
     global whisper_model
     if member is None:
         logger.warning("[Whisper] Received transcription task with member=None, skipping.")
@@ -943,17 +957,20 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member
     guild_id = channel.guild.id
     try:
         start_time = time.time()
+        # --- Log the correct sample rate (should be 16000 now) ---
         logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes {sample_rate}Hz MONO 音訊...")
 
+        # 1. Convert mono int16 bytes (at sample_rate Hz) to numpy float32 array
         audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
 
+        # 2. Run transcription in executor
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            None,
+            None, # Use default executor
             functools.partial(
                 whisper_model.transcribe,
-                audio_float32,
+                audio_float32, # Pass the float32 numpy array (now at 16kHz)
                 language=STT_LANGUAGE,
                 fp16=torch.cuda.is_available(),
             )
@@ -963,11 +980,14 @@ async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member
         duration = time.time() - start_time
         logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s (Guild: {guild_id})。結果: '{text}'")
 
+        # 3. Handle the transcription result
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
         logger.exception(f"[Whisper] 處理來自 {member.display_name} 的音訊時發生錯誤 (Guild: {guild_id}): {e}")
 
+
+# --- Slash Commands (Voice) ---
 
 @bot.tree.command(name='join', description="讓機器人加入語音頻道並開始監聽")
 @app_commands.guild_only()
@@ -1205,6 +1225,7 @@ async def stop_listening(interaction: discord.Interaction):
          await interaction.response.send_message("我目前不在任何語音頻道中。", ephemeral=True)
 
 
+# --- Voice State Update Handler ---
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
     if member.bot: return
@@ -1320,6 +1341,7 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                      if guild_id in listening_guilds: del listening_guilds[guild_id]
 
 
+# --- Message Event Handler (Text Chat) ---
 @bot.event
 async def on_message(message: discord.Message):
     if message.author == bot.user: return
@@ -1384,7 +1406,7 @@ async def on_message(message: discord.Message):
         finally:
             if conn: conn.close()
 
-    def store_chat_message(user_str, content_str, timestamp_str):
+    def store_chat_message(user_str, content_str, timestamp_str): # Renamed for clarity
         if not content_str:
             logger.warning(f"Attempted to store empty chat message from {user_str} for guild {guild_id}")
             return
@@ -1411,7 +1433,7 @@ async def on_message(message: discord.Message):
             c.execute("CREATE TABLE IF NOT EXISTS message (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT)")
             c.execute("SELECT user, content FROM message ORDER BY id ASC LIMIT 60")
             rows = c.fetchall()
-            history = rows
+            history = rows # List of (user, content) tuples
             logger.debug(f"Retrieved {len(history)} messages from chat history for guild {guild_id}")
         except sqlite3.Error as e:
             logger.exception(f"DB error in get_chat_history for guild {guild_id}: {e}")
@@ -1421,7 +1443,7 @@ async def on_message(message: discord.Message):
 
     def get_user_points(user_id_str, user_name_str=None, join_date_iso=None):
         conn = None
-        points = 0
+        points = 0 # Default to 0 if not found or error
         try:
             conn = sqlite3.connect(points_db_path, timeout=10)
             cursor = conn.cursor()
@@ -1429,7 +1451,7 @@ async def on_message(message: discord.Message):
             cursor.execute('SELECT points FROM users WHERE user_id = ?', (user_id_str,))
             result = cursor.fetchone()
             if result:
-                points = int(result[0])
+                points = int(result[0]) # Convert result to int
             elif default_points >= 0 and user_name_str:
                 join_date_to_insert = join_date_iso if join_date_iso else datetime.now(timezone.utc).isoformat()
                 logger.info(f"User {user_name_str} (ID: {user_id_str}) not found in points DB (guild {guild_id}). Creating with {default_points} points.")
@@ -1438,26 +1460,26 @@ async def on_message(message: discord.Message):
                 if default_points > 0:
                     cursor.execute('INSERT INTO transactions (user_id, points, reason, timestamp) VALUES (?, ?, ?, ?)', (user_id_str, default_points, "初始贈送點數", get_current_time_utc8()))
                 conn.commit()
-                points = default_points
+                points = default_points # Return the newly assigned points
             else:
                  logger.debug(f"User {user_id_str} not found in points DB (guild {guild_id}) and default points non-positive or info missing. Returning 0 points.")
-                 points = 0
+                 points = 0 # Return 0, don't create entry
 
         except sqlite3.Error as e:
             logger.exception(f"DB error in get_user_points for user {user_id_str} in guild {guild_id}: {e}")
-        except ValueError:
+        except ValueError: # Handle case where point value in DB is not an integer
             logger.error(f"Value error converting points for user {user_id_str} in guild {guild_id}.")
-            points = 0
+            points = 0 # Default to 0 on conversion error
         finally:
             if conn: conn.close()
         return points
 
     def deduct_points(user_id_str, points_to_deduct, reason="與機器人互動扣點"):
-        current_points = get_user_points(user_id_str)
+        current_points = get_user_points(user_id_str) # Note: get_user_points needs name/join date if user might not exist
 
         if points_to_deduct <= 0:
              logger.warning(f"Attempted to deduct non-positive points ({points_to_deduct}) from user {user_id_str}. Skipping.")
-             return current_points
+             return current_points # Return current points without change
 
         conn = None
         try:
@@ -1475,7 +1497,7 @@ async def on_message(message: discord.Message):
             current_points_db = int(result[0])
             if current_points_db < points_to_deduct:
                 logger.warning(f"User {user_id_str} has insufficient points ({current_points_db}) to deduct {points_to_deduct} in guild {guild_id}.")
-                return current_points_db
+                return current_points_db # Return actual current points
 
             new_points = current_points_db - points_to_deduct
             cursor.execute('UPDATE users SET points = ? WHERE user_id = ?', (new_points, user_id_str))
@@ -1488,7 +1510,7 @@ async def on_message(message: discord.Message):
             return current_points
         except ValueError:
             logger.error(f"Value error converting points during deduction for user {user_id_str} in guild {guild_id}.")
-            return current_points
+            return current_points # Return points before failed attempt
         finally:
             if conn: conn.close()
         return current_points
@@ -1499,7 +1521,7 @@ async def on_message(message: discord.Message):
         c_analytics_msg = conn_analytics_msg.cursor()
         c_analytics_msg.execute("CREATE TABLE IF NOT EXISTS messages (message_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, channel_id TEXT, timestamp TEXT, content TEXT)")
         msg_time_utc = message.created_at.astimezone(timezone.utc).isoformat()
-        content_to_store = message.content[:1000] if message.content else ""
+        content_to_store = message.content[:1000] if message.content else "" # Limit content length
         c_analytics_msg.execute("INSERT INTO messages (user_id, user_name, channel_id, timestamp, content) VALUES (?, ?, ?, ?, ?)",
                                 (str(user_id), user_name, str(channel.id), msg_time_utc, content_to_store))
         conn_analytics_msg.commit()
@@ -1604,7 +1626,7 @@ async def on_message(message: discord.Message):
                 ]
 
                 for db_user, db_content in chat_history_raw:
-                    if db_content:
+                    if db_content: # Ensure content is not empty
                         role = "user" if db_user != bot_name else "model"
                         chat_history_processed.append({"role": role, "parts": [{"text": db_content}]})
                     else:
@@ -1779,6 +1801,7 @@ async def on_message(message: discord.Message):
                 except Exception as reply_err:
                     logger.error(f"發送錯誤回覆訊息失敗 (伺服器 {guild_id}): {reply_err}")
 
+# --- Bot Execution ---
 def bot_run():
     if not discord_bot_token:
         logger.critical("設定檔中未設定 Discord Bot Token！機器人無法啟動。")
@@ -1788,32 +1811,22 @@ def bot_run():
     if not servers:
          logger.warning("設定檔中 'servers' 列表為空或未設定。機器人可能無法正確處理多伺服器設定。")
 
-    # --- Use global declarations for VAD model and unpacked functions ---
-    global whisper_model, vad_model, get_speech_ts, save_audio, read_audio, VADIterator, collect_chunks
+    # --- Use global declarations for VAD model and utils object ---
+    global whisper_model, vad_model, vad_utils
     try:
         logger.info("正在載入 VAD 模型 (Silero VAD)...")
         torch.hub._validate_not_a_forked_repo=lambda a,b,c: True
-        vad_model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                          model='silero_vad',
-                                          force_reload=False,
-                                          trust_repo=True)
-
-        # --- Unpack utils into global functions ---
-        (get_speech_ts_local,
-         save_audio_local,
-         read_audio_local,
-         VADIterator_local,
-         collect_chunks_local) = utils # Use local names during unpacking
-
+        # --- Correctly load model and utils ---
+        vad_model_local, utils_local = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                                      model='silero_vad',
+                                                      force_reload=False,
+                                                      trust_repo=True)
         # --- Assign to global variables ---
-        get_speech_ts = get_speech_ts_local
-        save_audio = save_audio_local
-        read_audio = read_audio_local
-        VADIterator = VADIterator_local
-        collect_chunks = collect_chunks_local
+        vad_model = vad_model_local
+        vad_utils = utils_local # Assign the returned utils object directly
 
-        # --- Remove the incorrect assignment ---
-        # vad_utils = utils
+        # --- Remove the incorrect unpacking ---
+        # (get_speech_ts, ...) = utils
 
         logger.info("VAD 模型及工具載入完成。")
 
@@ -1826,12 +1839,8 @@ def bot_run():
         logger.critical(f"載入 STT 或 VAD 模型失敗: {e}", exc_info=True)
         logger.warning("STT/VAD 功能可能無法使用。")
         vad_model = None
-        # --- Set unpacked functions to None on error ---
-        get_speech_ts = None
-        save_audio = None
-        read_audio = None
-        VADIterator = None
-        collect_chunks = None
+        # --- Set vad_utils to None on error ---
+        vad_utils = None
         whisper_model = None
 
     logger.info("正在嘗試啟動機器人...")
