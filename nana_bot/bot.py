@@ -938,54 +938,38 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
 
 def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
-    """Resamples PCM audio data from original_sr to target_sr."""
     if original_sr == target_sr:
         return pcm_data
-
     try:
-        audio_np = np.frombuffer(pcm_data, dtype=np.int16)
-
-        is_potentially_stereo = audio_np.shape[0] % 2 == 0
-
-        if is_potentially_stereo and audio_np.shape[0] > 0:
-            try:
-                audio_np_stereo = audio_np.reshape(-1, 2)
-                audio_np_mono = (audio_np_stereo.astype(np.float32).sum(axis=1) / 2.0).astype(np.int16)
-            except ValueError as reshape_err:
-                logger.warning(f"[Resample] Reshape to stereo failed ({reshape_err}), treating as mono.")
-                audio_np_mono = audio_np
-        else:
-            audio_np_mono = audio_np
-
-        if audio_np_mono.shape[0] == 0:
-            return bytes()
-
-        audio_tensor = torch.from_numpy(audio_np_mono.astype(np.float32) / 32768.0).unsqueeze(0)
-
+        audio_np = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float64)
+        audio_np /= 32768.0
+        audio_tensor = torch.from_numpy(audio_np).unsqueeze(0)
         resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
         resampled_tensor = resampler(audio_tensor)
-
-        resampled_np = (resampled_tensor.squeeze(0).numpy() * 32768.0).astype(np.int16)
-
+        resampled_np = resampled_tensor.squeeze(0).numpy()
+        resampled_np = (resampled_np * 32768.0).astype(np.int16)
+        if target_sr > 0:
+            total_samples = resampled_np.shape[0]
+            whole_sec_samples = (total_samples // target_sr) * target_sr
+            if whole_sec_samples > 0 and whole_sec_samples < total_samples:
+                resampled_np = resampled_np[:whole_sec_samples]
         return resampled_np.tobytes()
-
-    except ImportError:
-        logger.error("[Resample] torchaudio or numpy not available for resampling.")
-        return pcm_data
     except Exception as e:
-        logger.error(f"[Resample] Audio resampling failed from {original_sr}Hz to {target_sr}Hz: {e}", exc_info=debug)
+        logger.error(f"[Resample] 音訊重取樣失敗 from {original_sr} to {target_sr}: {e}")
         return pcm_data
 
-
-def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int, channel: discord.TextChannel, loop: asyncio.AbstractEventLoop):
+def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int,
+                        channel: discord.TextChannel, loop: asyncio.AbstractEventLoop):
     """
-    Processes incoming audio chunks using Silero VAD.
-    Triggers Whisper transcription when speech ends.
+    處理從 Discord 收到的音訊數據塊（使用 Silero VAD）。
     """
-    global audio_buffers, vad_model, expecting_voice_query_from
+    global audio_buffers, vad_model
 
-    if member is None or member.bot: return
-    if not vad_model: return
+    if member is None or member.bot:
+        return
+    if not vad_model:
+        logger.error("[VAD] VAD model not loaded. Cannot process audio chunk.")
+        return
 
     user_id = member.id
     pcm_data = audio_data.pcm
@@ -993,152 +977,151 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
 
     try:
         resampled_pcm = resample_audio(pcm_data, original_sr, VAD_SAMPLE_RATE)
-        if not resampled_pcm: return
+        if not resampled_pcm:
+            return
 
         audio_int16 = np.frombuffer(resampled_pcm, dtype=np.int16)
         audio_float32 = torch.from_numpy(audio_int16.astype(np.float32) / 32768.0)
 
         actual_samples = audio_float32.shape[0]
-        if actual_samples == 0: return
+        if actual_samples == 0:
+            return
+        if actual_samples > VAD_EXPECTED_SAMPLES:
+            processed_audio_tensor = audio_float32[:VAD_EXPECTED_SAMPLES]
+        elif actual_samples < VAD_EXPECTED_SAMPLES:
+            padding_size = VAD_EXPECTED_SAMPLES - actual_samples
+            padding = torch.zeros(padding_size)
+            processed_audio_tensor = torch.cat((audio_float32, padding))
+        else:
+            processed_audio_tensor = audio_float32
 
-        processed_samples = 0
-        while processed_samples < actual_samples:
-            chunk_end = min(processed_samples + VAD_EXPECTED_SAMPLES, actual_samples)
-            current_chunk_tensor = audio_float32[processed_samples:chunk_end]
-            current_chunk_len = current_chunk_tensor.shape[0]
 
-            if current_chunk_len < VAD_EXPECTED_SAMPLES:
-                padding_size = VAD_EXPECTED_SAMPLES - current_chunk_len
-                padding = torch.zeros(padding_size)
-                vad_input_tensor = torch.cat((current_chunk_tensor, padding))
-            else:
-                vad_input_tensor = current_chunk_tensor
+        speech_prob = vad_model(processed_audio_tensor, VAD_SAMPLE_RATE).item()
+        is_speech_now = speech_prob >= VAD_THRESHOLD
 
-            if vad_input_tensor.shape[0] != VAD_EXPECTED_SAMPLES:
-                 logger.warning(f"[VAD] Input tensor shape mismatch for {member.display_name}. Expected {VAD_EXPECTED_SAMPLES}, got {vad_input_tensor.shape[0]}. Skipping VAD for this chunk.")
-                 processed_samples += current_chunk_len
-                 continue
+        user_state = audio_buffers[user_id]
+        current_time = time.time()
 
-            speech_prob = vad_model(vad_input_tensor, VAD_SAMPLE_RATE).item()
-            is_speech_now = speech_prob >= VAD_THRESHOLD
+        if is_speech_now:
+            user_state['buffer'].extend(pcm_data)
+            user_state['last_speech_time'] = current_time
+            user_state['is_speaking'] = True
+        else:
+            if user_state['is_speaking']:
+                silence_duration = (current_time - user_state['last_speech_time']) * 1000
+                if silence_duration >= VAD_MIN_SILENCE_DURATION_MS:
+                    logger.info(f"[VAD] End of speech detected for {member.display_name} after {silence_duration:.0f}ms silence.")
+                    user_state['is_speaking'] = False
+                    full_speech_buffer = user_state['buffer']
+                    user_state['buffer'] = bytearray()
 
-            user_state = audio_buffers[user_id]
-            current_time = time.time()
+                    if len(full_speech_buffer) >= original_sr * 2 * 1.0:
+                        logger.info(f"[VAD] Triggering Whisper for {member.display_name} ({len(full_speech_buffer)} bytes)")
+                        if loop:
+                            loop.create_task(
+                                run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
+                            )
+                        else:
+                            logger.error("[VAD/AudioProc] Cannot schedule Whisper task: No event loop provided.")
+                    else:
+                        logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes < 1s), skipping Whisper.")
+                else:
+                    user_state['buffer'].extend(pcm_data)
 
-            byte_start = int((processed_samples / VAD_SAMPLE_RATE) * original_sr * 2)
-            byte_end = int((chunk_end / VAD_SAMPLE_RATE) * original_sr * 2)
-            original_chunk_bytes = pcm_data[byte_start:byte_end]
-
-            if is_speech_now:
-                user_state['buffer'].extend(original_chunk_bytes)
-                user_state['last_speech_time'] = current_time
-                if not user_state['is_speaking']:
-                    logger.debug(f"[VAD] Start of speech detected for {member.display_name}")
-                    user_state['is_speaking'] = True
-            else:
-                if user_state['is_speaking']:
-                    silence_duration = (current_time - user_state['last_speech_time']) * 1000
-                    if silence_duration >= VAD_MIN_SILENCE_DURATION_MS:
-                        logger.info(f"[VAD] End of speech detected for {member.display_name} after {silence_duration:.0f}ms silence.")
-                        user_state['is_speaking'] = False
-                        full_speech_buffer = user_state['buffer']
-                        user_state['buffer'] = bytearray()
-
-                        min_bytes_for_transcription = int(original_sr * 2 * 0.5)
-                        if len(full_speech_buffer) > min_bytes_for_transcription:
-                            logger.info(f"[VAD] Speech segment long enough ({len(full_speech_buffer)} bytes). Triggering Whisper for {member.display_name}.")
-                            if loop and not loop.is_closed():
-                                loop.create_task(
-                                    run_whisper_transcription(bytes(full_speech_buffer), original_sr, member, channel)
-                                )
-                            else: logger.error("[VAD/AudioProc] Cannot schedule Whisper task: Event loop not available or closed.")
-                        else: logger.info(f"[VAD] Speech segment for {member.display_name} too short ({len(full_speech_buffer)} bytes), skipping Whisper.")
-                        pass
-                    pass
-
-            processed_samples += current_chunk_len
-
-    except ValueError as ve:
-         if "Expected input tensor" in str(ve): logger.error(f"[VAD/AudioProc] VAD model input error for {member.display_name}. Check VAD_EXPECTED_SAMPLES. Error: {ve}")
-         else: logger.exception(f"[VAD/AudioProc] ValueError processing audio chunk for {member.display_name}: {ve}")
-         if user_id in audio_buffers: del audio_buffers[user_id]
     except Exception as e:
-        logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
-        if user_id in audio_buffers: del audio_buffers[user_id]
+        processed_audio_tensor_shape = 'N/A'
+        try:
+            processed_audio_tensor_shape = processed_audio_tensor.shape
+        except NameError:
+            pass
+        if "Provided number of samples is" in str(e):
+            logger.error(f"[VAD/AudioProc] VAD input size error for {member.display_name}. Input shape: {processed_audio_tensor_shape}. Error: {e}")
+        else:
+            logger.exception(f"[VAD/AudioProc] Error processing audio chunk for {member.display_name}: {e}")
+        if user_id in audio_buffers:
+            del audio_buffers[user_id]
 
-
-async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int,
-                                    member: discord.Member, channel: discord.TextChannel):
+async def run_whisper_transcription(audio_bytes: bytes, sample_rate: int, member: discord.Member, channel: discord.TextChannel):
     """
-    Runs Whisper transcription in the background and calls handle_stt_result.
+    在背景執行 Whisper 語音轉文字辨識。
     """
     global whisper_model
-    if member is None or member.bot: return
+    if member is None:
+        logger.warning("[Whisper] Received transcription task with member=None, skipping.")
+        return
     if not whisper_model:
         logger.error("[Whisper] Whisper model not loaded. Cannot transcribe.")
-        return
-    if not audio_bytes:
-        logger.warning(f"[Whisper] Received empty audio buffer for {member.display_name}, skipping transcription.")
         return
 
     try:
         start_time = time.time()
-        logger.info(f"[Whisper] Starting transcription for {member.display_name}. Audio size: {len(audio_bytes)} bytes, SR: {sample_rate}Hz.")
+        logger.info(f"[Whisper] 開始處理來自 {member.display_name} 的 {len(audio_bytes)} bytes 音訊 (SR: {sample_rate})...")
 
-        target_sr = 16000
-        if sample_rate != target_sr:
-            original_sr = sample_rate
-            resampled_pcm = resample_audio(audio_bytes, original_sr, target_sr)
-            if not resampled_pcm:
-                logger.error(f"[Whisper] Audio resampling to {target_sr}Hz failed for {member.display_name}. Aborting transcription.")
-                return
-            audio_bytes_for_whisper = resampled_pcm
-            whisper_input_sr = target_sr
-            logger.debug(f"[Whisper] Resampled audio from {original_sr}Hz to {whisper_input_sr}Hz for Whisper ({len(audio_bytes)} -> {len(audio_bytes_for_whisper)} bytes).")
-        else:
-            audio_bytes_for_whisper = resample_audio(audio_bytes, sample_rate, target_sr)
-            whisper_input_sr = target_sr
-            if not audio_bytes_for_whisper:
-                 logger.error(f"[Whisper] Mono conversion failed for {member.display_name} at {sample_rate}Hz. Aborting.")
-                 return
-
-        if debug:
+        audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+        if audio_int16.size == 0:
+            logger.warning(f"[Whisper] 接收到 {member.display_name} 的空白音訊片段，跳過處理。")
+            return
+        total_duration = audio_int16.shape[0] / sample_rate if sample_rate > 0 else 0
+        if total_duration > 30:
+            original_length_sec = total_duration
+            desired_samples = int(sample_rate * 30)
+            audio_int16 = audio_int16[:desired_samples]
+            logger.warning(f"[Whisper] 音訊片段長度 {original_length_sec:.1f}s 超過 30s，已裁剪至30秒長度進行處理。")
+        if sample_rate != 16000:
             try:
-                debug_audio_dir = "whisper_debug_audio"
-                os.makedirs(debug_audio_dir, exist_ok=True)
-                debug_filename = os.path.join(debug_audio_dir, f"input_{member.id}_{uuid.uuid4()}.wav")
-                with wave.open(debug_filename, 'wb') as wf:
-                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(whisper_input_sr)
-                    wf.writeframes(audio_bytes_for_whisper)
-                logger.debug(f"[Whisper Debug] Saved 16kHz mono audio for {member.display_name} to {debug_filename}")
-            except Exception as save_e: logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
+                audio_bytes_16k = resample_audio(audio_int16.tobytes(), sample_rate, 16000)
+                audio_int16 = np.frombuffer(audio_bytes_16k, dtype=np.int16)
+                sample_rate = 16000
+            except Exception as rs_e:
+                logger.error(f"[Whisper] 音訊重取樣至16kHz失敗，將使用原始取樣率。錯誤: {rs_e}")
 
-        audio_int16 = np.frombuffer(audio_bytes_for_whisper, dtype=np.int16)
+        try:
+            debug_audio_dir = "whisper_debug_audio"
+            os.makedirs(debug_audio_dir, exist_ok=True)
+            debug_filename = os.path.join(debug_audio_dir, f"input_{member.id}_{uuid.uuid4()}.wav")
+            with wave.open(debug_filename, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio_int16.tobytes())
+            logger.info(f"[Whisper Debug] Saved audio chunk for {member.display_name} to {debug_filename}")
+        except Exception as save_e:
+            logger.error(f"[Whisper Debug] Failed to save debug audio: {save_e}")
+
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
-
-        if audio_float32.shape[0] == 0:
-             logger.warning(f"[Whisper] Audio buffer became empty after processing for {member.display_name}. Skipping.")
-             return
+        if audio_float32.size > 0:
+            logger.debug(f"[Whisper Debug] Audio float32 stats: min={np.min(audio_float32):.4f}, max={np.max(audio_float32):.4f}, mean={np.mean(audio_float32):.4f}")
+        else:
+            logger.debug("[Whisper Debug] Audio float32 array is empty.")
 
         loop = asyncio.get_running_loop()
-        transcribe_func = functools.partial(
-            whisper_model.transcribe, audio_float32, language=STT_LANGUAGE, fp16=torch.cuda.is_available()
+        result = await loop.run_in_executor(
+            None,
+            functools.partial(
+                whisper_model.transcribe,
+                audio_float32,
+                language=STT_LANGUAGE,
+                fp16=torch.cuda.is_available(),
+                temperature=0.0,
+                logprob_threshold=-1.0
+            )
         )
-        result = await loop.run_in_executor(None, transcribe_func)
 
         text = ""
-        if isinstance(result, dict): text = result.get("text", "").strip()
-        elif isinstance(result, str): text = result.strip()
-        else: logger.warning(f"[Whisper] Unexpected result type from transcribe for {member.display_name}: {type(result)}")
-
+        if isinstance(result, dict):
+            text = result.get("text", "").strip()
+        else:
+            logger.error(f"[Whisper] 辨識結果型態異常 (來自 {member.display_name}): {type(result)}")
+            text = ""
+        if text == "":
+            logger.warning(f"[Whisper] 來自 {member.display_name} 的辨識結果為空白。")
         duration = time.time() - start_time
-        logger.info(f"[Whisper] Transcription complete for {member.display_name} in {duration:.2f}s. Result: '{text}'")
+        logger.info(f"[Whisper] 來自 {member.display_name} 的辨識完成，耗時 {duration:.2f}s。結果: '{text}'")
 
         await handle_stt_result(text, member, channel)
 
     except Exception as e:
-        logger.exception(f"[Whisper] Error during transcription process for {member.display_name}: {e}")
-
+        logger.exception(f"[Whisper] 處理來自 {member.display_name} 的音訊時發生錯誤: {e}")
 
 @bot.tree.command(name='join', description="讓機器人加入您所在的語音頻道並開始聆聽")
 async def join(interaction: discord.Interaction):
