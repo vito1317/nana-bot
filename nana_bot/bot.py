@@ -938,22 +938,39 @@ async def handle_stt_result(text: str, user: discord.Member, channel: discord.Te
 
 
 def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int) -> bytes:
+    """將 PCM 音訊從 original_sr 重取樣到 target_sr，回傳重取樣後的 PCM bytes。"""
     if original_sr == target_sr:
         return pcm_data
+
     try:
-        audio_np = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float64)
-        audio_np /= 32768.0
-        audio_tensor = torch.from_numpy(audio_np).unsqueeze(0)
+        audio_int16 = np.frombuffer(pcm_data, dtype=np.int16)
+
+        if audio_int16.size % 2 == 0 and original_sr and audio_int16.size % original_sr != 0:
+            audio_int16 = audio_int16.reshape(-1, 2)
+            audio_float = audio_int16.astype(np.float32)
+            mono_float = audio_float.mean(axis=1)
+            audio_int16 = np.clip(mono_float, -32768, 32767).astype(np.int16)
+
+        audio_float32 = audio_int16.astype(np.float32) / 32768.0
+        audio_tensor = torch.from_numpy(audio_float32).unsqueeze(0)
+
         resampler = torchaudio.transforms.Resample(orig_freq=original_sr, new_freq=target_sr)
         resampled_tensor = resampler(audio_tensor)
-        resampled_np = resampled_tensor.squeeze(0).numpy()
-        resampled_np = (resampled_np * 32768.0).astype(np.int16)
+
+        resampled_audio = resampled_tensor.squeeze(0).numpy()
+        resampled_audio = np.clip(resampled_audio, -1.0, 0.999969)
+        resampled_int16 = (resampled_audio * 32768.0).astype(np.int16)
+
         if target_sr > 0:
-            total_samples = resampled_np.shape[0]
+            total_samples = resampled_int16.shape[0]
             whole_sec_samples = (total_samples // target_sr) * target_sr
-            if whole_sec_samples > 0 and whole_sec_samples < total_samples:
-                resampled_np = resampled_np[:whole_sec_samples]
-        return resampled_np.tobytes()
+            if 0 < whole_sec_samples < total_samples:
+                tail = resampled_int16[whole_sec_samples:]
+                if np.all(tail == 0):
+                    resampled_int16 = resampled_int16[:whole_sec_samples]
+
+        return resampled_int16.tobytes()
+
     except Exception as e:
         logger.error(f"[Resample] 音訊重取樣失敗 from {original_sr} to {target_sr}: {e}")
         return pcm_data
