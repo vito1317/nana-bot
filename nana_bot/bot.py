@@ -1484,45 +1484,70 @@ async def ask_voice(interaction: discord.Interaction):
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
+    """Handles voice state changes for users and the bot itself."""
     global expecting_voice_query_from, audio_buffers, voice_clients, listening_guilds
 
-    if member.bot and member.id != bot.user.id: return
+    if member.bot and member.id != bot.user.id: return # Ignore other bots
 
     guild = member.guild
     guild_id = guild.id
     user_id = member.id
 
+    # --- Bot's own state change ---
     if member.bot and member.id == bot.user.id:
-        if before.channel and not after.channel:
-             logger.warning(f"Bot was disconnected from voice channel '{before.channel.name}' in guild {guild_id}.")
-             if guild_id in voice_clients: del voice_clients[guild_id]
-             if guild_id in listening_guilds: del listening_guilds[guild_id]
-
-             current_guild = bot.get_guild(guild_id)
+        # Define cleanup logic as a local function for reuse
+        def _cleanup_bot_state(gid, current_guild):
+             """Cleans up voice clients, listening state, expectations, and buffers for a guild when the bot leaves."""
+             logger.debug(f"Starting bot state cleanup for guild {gid}")
+             if gid in voice_clients: del voice_clients[gid]
+             if gid in listening_guilds: del listening_guilds[gid]
              if current_guild:
                 users_in_guild = {m.id for m in current_guild.members}
+                # Clear expectations
                 users_to_clear_expect = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
                 cleared_expect = 0
                 for uid in users_to_clear_expect:
                     expecting_voice_query_from.remove(uid)
                     cleared_expect += 1
+                # Clear buffers
                 users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
                 cleared_buffers = 0
                 for uid in users_to_clear_buffer:
                     if uid in audio_buffers:
                         del audio_buffers[uid]
                         cleared_buffers += 1
-                logger.info(f"Cleaned up STT state ({cleared_expect} expectations, {cleared_buffers} buffers) for guild {guild_id} after bot disconnection.")
-             else: logger.warning(f"Could not get guild {guild_id} object during bot disconnect cleanup.")
-        elif before.channel != after.channel and after.channel:
-            logger.info(f"Bot moved from '{before.channel.name}' to '{after.channel.name}' in guild {guild_id}.")
+                logger.info(f"Cleaned up STT state ({cleared_expect} expectations, {cleared_buffers} buffers) for guild {gid} due to bot state change.")
+             else: logger.warning(f"Could not get guild {gid} object during bot state cleanup.")
+
+        if before.channel and not after.channel: # Bot was disconnected or left
+             logger.warning(f"Bot was disconnected from voice channel '{before.channel.name}' in guild {guild_id}.") # Safe: before.channel exists
+             _cleanup_bot_state(guild_id, guild) # Perform cleanup
+
+        elif not before.channel and after.channel: # Bot just joined a channel
+            logger.info(f"Bot joined voice channel '{after.channel.name}' in guild {guild_id}.") # Safe: after.channel exists
+            # Joining should be handled by the /join command logic,
+            # but we log it here if the event fires. No cleanup needed here usually.
+
+        elif before.channel and after.channel and before.channel != after.channel: # Bot moved channel
+            logger.info(f"Bot moved from '{before.channel.name}' to '{after.channel.name}' in guild {guild_id}.") # Safe: both exist
+            # Update the voice_client entry if necessary (usually not needed as object persists)
             if guild_id in voice_clients:
-                 vc = guild.voice_client
+                 vc = guild.voice_client # Get current client from guild
                  if vc: voice_clients[guild_id] = vc
-                 else: del voice_clients[guild_id]
+                 else:
+                     logger.warning(f"Bot moved, but guild.voice_client is None for guild {guild_id}. Removing from voice_clients dict.")
+                     if guild_id in voice_clients: del voice_clients[guild_id]
+            # Keep listening state if it was listening before the move
+            # No major cleanup usually required just for moving
 
-        return
+        # Optional: Handle case where channel is the same but state changed (e.g., mute)
+        # elif before.channel and after.channel and before.channel == after.channel:
+        #     logger.debug(f"Bot voice state changed within the same channel '{after.channel.name}'")
 
+        return # End processing for bot's own state change
+    # --- End Bot's own state change ---
+
+    # --- User state change ---
     bot_voice_client = voice_clients.get(guild_id)
     bot_is_connected = bot_voice_client and bot_voice_client.is_connected()
 
@@ -1539,42 +1564,73 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
         if cleared_buffer or cleared_expect:
             logger.debug(f"Cleared STT state for user {uid} in guild {gid} (Buffer: {cleared_buffer}, Expect: {cleared_expect}). Reason: {reason}")
 
+    # If bot is not connected, user actions don't affect bot's STT state directly
     if not bot_is_connected:
+        # Clear user's state if they were being tracked, regardless of channel change
         clear_user_stt_state(user_id, guild_id, "User changed VC state while Bot disconnected")
+        # If bot *was* tracked as listening but isn't connected, clean up listening state
         if guild_id in listening_guilds:
             logger.warning(f"[VC_State] Cleaning up stale listening flag for guild {guild_id} (Bot not connected).")
             del listening_guilds[guild_id]
         return
 
+    # Bot is connected, check user's relation to bot's channel
     bot_channel = bot_voice_client.channel
-    if not bot_channel: return
+    if not bot_channel:
+        logger.warning(f"[VC_State] Bot voice client exists for guild {guild_id} but has no channel attribute.")
+        return # Cannot proceed without bot's channel info
 
     user_was_in_bot_channel = before.channel == bot_channel
     user_is_in_bot_channel = after.channel == bot_channel
 
     if not user_was_in_bot_channel and user_is_in_bot_channel:
+        # User joined bot's channel
         logger.info(f"User '{member.display_name}' (ID: {user_id}) joined bot's channel '{bot_channel.name}' (Guild: {guild_id})")
+        # Optional: TTS announcement (consider rate limits/annoyance)
+        # human_members_present = [m for m in bot_channel.members if not m.bot]
+        # if len(human_members_present) > 1: # Announce only if others are present
+        #     tts_message = f"{member.display_name} 加入了"
+        #     # await play_tts(bot_voice_client, tts_message, context="User Join Announce")
 
     elif user_was_in_bot_channel and not user_is_in_bot_channel:
-        event_type = "disconnected from voice" if not after.channel else f"moved from '{before.channel.name}' to '{after.channel.name}'"
-        logger.info(f"User '{member.display_name}' (ID: {user_id}) left bot's channel ({event_type}) (Guild: {guild_id})")
+        # User left bot's channel (or disconnected completely from voice)
+        if before.channel: # Make sure before.channel is not None before accessing name
+            event_type = "disconnected from voice" if not after.channel else f"moved from '{before.channel.name}' to '{after.channel.name if after.channel else 'None'}'"
+            logger.info(f"User '{member.display_name}' (ID: {user_id}) left bot's channel '{before.channel.name}' ({event_type}) (Guild: {guild_id})")
+        else: # Should be rare if user_was_in_bot_channel was True, but handle defensively
+             event_type = "disconnected from voice" if not after.channel else f"moved from 'Unknown' to '{after.channel.name if after.channel else 'None'}'"
+             logger.info(f"User '{member.display_name}' (ID: {user_id}) left bot's channel ({event_type}) (Guild: {guild_id})")
+
         clear_user_stt_state(user_id, guild_id, "User left bot's voice channel / disconnected")
+        # Optional: TTS announcement
+        # human_members_remaining = [m for m in bot_channel.members if not m.bot and m.id != user_id]
+        # if human_members_remaining: # Announce only if bot isn't left alone
+        #      tts_message = f"{member.display_name} 離開了"
+             # await play_tts(bot_voice_client, tts_message, context="User Leave Announce")
 
     elif user_was_in_bot_channel and user_is_in_bot_channel:
+        # User muted/deafened/etc. within the same channel - usually no action needed for STT
+        # logger.debug(f"User '{member.display_name}' state changed within bot channel (Mute/Deafen?)")
         pass
     elif not user_was_in_bot_channel and not user_is_in_bot_channel:
+         # User moved between other channels, not involving the bot's channel
+         # Clear state just in case they were tracked somehow
          clear_user_stt_state(user_id, guild_id, "User switched channels unrelated to bot")
 
 
+    # --- Auto-leave check: Run slightly delayed after state change ---
     await asyncio.sleep(2.0)
 
+    # Re-fetch the current VC state as it might have changed (e.g., bot disconnected by command during sleep)
     current_vc = voice_clients.get(guild_id)
     if current_vc and current_vc.is_connected():
         current_channel = current_vc.channel
         if current_channel:
+            # Check if only the bot is left in the channel
             final_human_members = [m for m in current_channel.members if not m.bot]
             if not final_human_members:
                 logger.info(f"Bot is alone in channel '{current_channel.name}' (Guild: {guild_id}). Initiating auto-leave.")
+                # Perform full guild cleanup before leaving
                 if guild_id in listening_guilds:
                     if current_vc.is_listening():
                         try: current_vc.stop_listening()
@@ -1582,22 +1638,43 @@ async def on_voice_state_update(member: discord.Member, before: discord.VoiceSta
                     del listening_guilds[guild_id]
 
                 guild_obj = bot.get_guild(guild_id)
-                if guild_obj:
-                    users_in_guild = {m.id for m in guild_obj.members}
-                    users_to_clear_expect = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
-                    for uid in users_to_clear_expect: expecting_voice_query_from.remove(uid)
-                    users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
-                    for uid in users_to_clear_buffer:
-                        if uid in audio_buffers: del audio_buffers[uid]
-                    logger.debug(f"Cleared all audio buffers & expectations for guild {guild_id} (Auto-Leave).")
+                # Use the same cleanup logic defined for bot disconnect
+                def _cleanup_bot_state_for_auto_leave(gid, current_guild_obj):
+                    """Internal helper duplicate for auto-leave context."""
+                    logger.debug(f"Starting bot state cleanup for auto-leave in guild {gid}")
+                    # Don't remove from voice_clients here, disconnect does that implicitly via state change
+                    # if gid in voice_clients: del voice_clients[gid]
+                    if gid in listening_guilds: del listening_guilds[gid] # Ensure listening flag is clear
+                    if current_guild_obj:
+                        users_in_guild = {m.id for m in current_guild_obj.members}
+                        users_to_clear_expect = [uid for uid in expecting_voice_query_from if uid in users_in_guild]
+                        cleared_expect = 0
+                        for uid in users_to_clear_expect: expecting_voice_query_from.remove(uid); cleared_expect += 1
+                        users_to_clear_buffer = [uid for uid in audio_buffers if uid in users_in_guild]
+                        cleared_buffers = 0
+                        for uid in users_to_clear_buffer:
+                             if uid in audio_buffers: del audio_buffers[uid]; cleared_buffers += 1
+                        logger.info(f"Cleaned up STT state ({cleared_expect} expectations, {cleared_buffers} buffers) for guild {gid} (Auto-Leave).")
+                    else: logger.warning(f"Could not get guild {gid} object during auto-leave cleanup.")
 
+                _cleanup_bot_state_for_auto_leave(guild_id, guild_obj)
+
+                # Disconnect
                 try:
                     await current_vc.disconnect(force=False)
                     logger.info(f"Successfully auto-left channel '{current_channel.name}' (Guild: {guild_id})")
                 except Exception as e: logger.exception(f"Error during auto-leave disconnect: {e}")
                 finally:
-                    if guild_id in voice_clients: del voice_clients[guild_id]
+                    # Ensure client is removed from dict after disconnect attempt (on_voice_state_update for bot should also handle this)
+                    if guild_id in voice_clients:
+                         # Check if the client object is still the same one we tried to disconnect
+                         if voice_clients.get(guild_id) == current_vc:
+                             del voice_clients[guild_id]
 
+            # else: logger.debug(f"Humans still present in {current_channel.name}, not auto-leaving.")
+        else:
+            logger.warning(f"[VC_State] Auto-leave check: VC exists for {guild_id} but has no channel after wait?")
+    # else: logger.debug(f"VC no longer exists or connected for {guild_id} after wait, no auto-leave check needed.")
 
 @bot.event
 async def on_message(message: discord.Message):
