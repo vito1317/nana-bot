@@ -662,7 +662,7 @@ async def on_ready():
         for guild in bot.guilds: # Ensures commands are visible faster in existing guilds
              try:
                  # Pass guild object to sync for specific guild
-                 synced = await bot.tree.sync(guild=guild) # Pass guild object for guild-specific sync
+                 synced = await bot.tree.sync() # Pass guild object for guild-specific sync
                  synced_commands += len(synced)
                  logger.debug(f"已為伺服器 {guild.id} ({guild.name}) 同步 {len(synced)} 個命令。")
              except discord.errors.Forbidden:
