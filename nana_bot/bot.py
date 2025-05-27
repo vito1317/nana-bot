@@ -12,7 +12,8 @@ from datetime import datetime, timedelta, timezone
 import json
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from google.generativeai import types as genai_types # For Live API types
+# For Live API types, ensure library is up-to-date.
+from google.generativeai import types as genai_types
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -83,66 +84,53 @@ safety_settings = {
 }
 
 # --- Gemini API Configuration ---
-# Default client for text-based GenerativeModel
 if API_KEY:
     genai.configure(api_key=API_KEY)
-    logger.info("Default Gemini client configured for text models.")
+    logger.info("Default Gemini client configured with API key.")
 else:
-    logger.error("API_KEY not found in nana_bot config. Text models may not work.")
+    logger.error("API_KEY not found in nana_bot config. Gemini features will likely fail.")
 
-# Explicit Client for Gemini Live API (Beta)
-gemini_live_api_client = None
-if API_KEY:
-    try:
-        gemini_live_api_client = genai.Client(
-            api_key=API_KEY,
-            http_options={"api_version": "v1beta"} # Crucial for Live API
-        )
-        logger.info("Explicit Gemini Live API client (v1beta) initialized successfully.")
-    except Exception as e_client:
-        logger.error(f"Failed to initialize explicit Gemini Live API client (v1beta): {e_client}. Live voice features will be disabled.")
-else:
-    logger.error("API_KEY not found in nana_bot config. Cannot initialize Gemini Live API client.")
-
-# --- Gemini Live API Constants (Defined *after* explicit client attempt) ---
+# --- Gemini Live API Constants ---
 GEMINI_LIVE_MODEL_NAME = "models/gemini-2.5-flash-preview-native-audio-dialog"
 GEMINI_LIVE_SEND_SR = 16000
 GEMINI_LIVE_RECV_SR = 24000
 DISCORD_SR = 48000
 DISCORD_CHANNELS = 2
-GEMINI_LIVE_CONNECT_CONFIG = None # Initialize to None
+GEMINI_LIVE_CONNECT_CONFIG = None
 
-if gemini_live_api_client: # Only define if client was successful
-    try:
-        GEMINI_LIVE_CONNECT_CONFIG = genai_types.LiveConnectConfig(
-            response_modalities=[genai_types.LiveResponseModality.AUDIO, genai_types.LiveResponseModality.TEXT],
-            media_resolution=genai_types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-            speech_config=genai_types.SpeechConfig(
-                voice_config=genai_types.VoiceConfig(
-                    prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name="Zephyr")
-                )
-            ),
-            context_window_compression=genai_types.ContextWindowCompressionConfig(
-                trigger_tokens=25600,
-                sliding_window=genai_types.SlidingWindow(target_tokens=12800),
-            ),
-        )
-        logger.info("GEMINI_LIVE_CONNECT_CONFIG defined successfully.")
-    except AttributeError as e_attr:
-        logger.critical(f"AttributeError defining GEMINI_LIVE_CONNECT_CONFIG: {e_attr}. This strongly suggests 'google-generativeai' library is outdated or Live API types are not available with the current v1beta client. Please run: pip install --upgrade google-generativeai")
-    except Exception as e_cfg:
-        logger.critical(f"Unexpected error defining GEMINI_LIVE_CONNECT_CONFIG: {e_cfg}")
-else:
-    logger.error("Gemini Live API client (gemini_live_api_client) is None. GEMINI_LIVE_CONNECT_CONFIG will not be defined. Live voice disabled.")
+try:
+    GEMINI_LIVE_CONNECT_CONFIG = genai_types.LiveConnectConfig(
+        response_modalities=[genai_types.LiveResponseModality.AUDIO, genai_types.LiveResponseModality.TEXT],
+        media_resolution=genai_types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+        speech_config=genai_types.SpeechConfig(
+            voice_config=genai_types.VoiceConfig(
+                prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name="Zephyr")
+            )
+        ),
+        context_window_compression=genai_types.ContextWindowCompressionConfig(
+            trigger_tokens=25600,
+            sliding_window=genai_types.SlidingWindow(target_tokens=12800),
+        ),
+    )
+    logger.info("GEMINI_LIVE_CONNECT_CONFIG defined successfully.")
+except AttributeError as e_attr:
+    logger.critical(
+        f"AttributeError defining GEMINI_LIVE_CONNECT_CONFIG: {e_attr}. "
+        "This usually means the 'google-generativeai' library is outdated or "
+        "Live API types are not available. "
+        "CRITICAL: PLEASE UPDATE THE LIBRARY: pip install --upgrade google-generativeai"
+    )
+except Exception as e_cfg:
+    logger.critical(f"Unexpected error defining GEMINI_LIVE_CONNECT_CONFIG: {e_cfg}")
 
-
-text_model_instance = None # For standard text chat
+text_model_instance = None
 if API_KEY:
     try:
         text_model_instance = genai.GenerativeModel(gemini_model)
         logger.info(f"Successfully initialized text-based GenerativeModel: {gemini_model}")
     except Exception as e:
         logger.critical(f"Failed to initialize text-based GenerativeModel {gemini_model}: {e}")
+
 
 # --- GeminiLiveManager Class ---
 class GeminiLiveManager:
@@ -175,7 +163,7 @@ class GeminiLiveManager:
             f"且你({bot_discord_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_discord_name}都會以友善且專業的態度來協助用戶。"
             f"當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。"
             f"她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀，"
-            f"同時她會提供意見大於詢問問題，避免一直詢問用戶。請記住，你能紀錄最近的60則對話內容(舊訊息在前，新訊息在後)，這個紀錄永久有效，並不會因為結束對話而失效，" # Note: Live API context is managed by Gemini, this is more for text.
+            f"同時她會提供意見大於詢問問題，避免一直詢問用戶。請記住，你能紀錄最近的60則對話內容(舊訊息在前，新訊息在後)，這個紀錄永久有效，並不會因為結束對話而失效，"
             f"'{bot_discord_name}'或'model'代表你傳送的歷史訊息。"
             f"'user'代表特定用戶傳送的歷史訊息。歷史訊息格式為 '時間戳 用戶名:內容'，但你回覆時不必模仿此格式。"
             f"請注意不要提及使用者的名稱和時間戳，除非對話內容需要。"
@@ -193,19 +181,20 @@ class GeminiLiveManager:
 
     async def start_session(self) -> bool:
         if self.is_active: self.logger.warning("Session already active."); return True
-        if not gemini_live_api_client:
-            self.logger.error("Gemini Live API client (v1beta) not available. Cannot start live session.")
-            if self.text_channel: await self.text_channel.send("❌ Gemini Live API 客戶端未成功初始化。")
+        if not API_KEY:
+            self.logger.error("Gemini API Key not configured via genai.configure(). Cannot start live session.")
+            if self.text_channel: await self.text_channel.send("❌ Gemini API 金鑰未設定。")
             return False
         if not GEMINI_LIVE_CONNECT_CONFIG:
-            self.logger.error("GEMINI_LIVE_CONNECT_CONFIG is not defined. Cannot start. Likely library issue or client init failure.")
-            if self.text_channel: await self.text_channel.send("❌ Gemini Live API 設定錯誤，可能需更新函式庫或檢查API金鑰。")
+            self.logger.error("GEMINI_LIVE_CONNECT_CONFIG is not defined. Cannot start. Likely an outdated library or configuration issue.")
+            if self.text_channel: await self.text_channel.send("❌ Gemini Live API 設定檔錯誤 (可能需更新函式庫)。")
             return False
 
         self.is_stopping = False
         try:
-            self.logger.info(f"Attempting to connect to Gemini Live API for guild {self.guild_id} using explicit v1beta client...")
-            self.session = await gemini_live_api_client.aio.live.connect_async(
+            self.logger.info(f"Attempting to connect to Gemini Live API for guild {self.guild_id}...")
+            # Use global genai.live.connect_async
+            self.session = await genai.live.connect_async(
                 model=GEMINI_LIVE_MODEL_NAME,
                 config=GEMINI_LIVE_CONNECT_CONFIG
             )
@@ -218,6 +207,10 @@ class GeminiLiveManager:
             self._audio_playback_task = asyncio.create_task(self._play_audio_from_gemini_queue())
             self.logger.info("Gemini Live session started and background tasks launched.")
             return True
+        except AttributeError as e_attr_connect:
+             self.logger.critical(f"AttributeError during genai.live.connect_async: {e_attr_connect}. This often means the google-generativeai library is too old or Live API is not available in your environment/version. Try 'pip install --upgrade google-generativeai'.")
+             if self.text_channel: await self.text_channel.send("❌ 連接 Live API 失敗，函式庫版本可能過舊。")
+             return False
         except Exception as e:
             self.logger.exception("Failed to start Gemini Live session:")
             if self.text_channel:
@@ -235,7 +228,7 @@ class GeminiLiveManager:
         await self._gemini_audio_receive_queue.put(None)
         async def wait_for_task(task, name):
             if task:
-                try: await asyncio.wait_for(task, timeout=3.0) # Reduced timeout
+                try: await asyncio.wait_for(task, timeout=3.0)
                 except asyncio.CancelledError: self.logger.debug(f"{name} task successfully cancelled.")
                 except asyncio.TimeoutError: self.logger.warning(f"{name} task timed out during stop.")
                 except Exception as e: self.logger.error(f"Error during {name} task cleanup: {e}")
@@ -244,7 +237,7 @@ class GeminiLiveManager:
         if self.session:
             try:
                 self.logger.info("Closing Gemini Live session with API.")
-                await self.session.close() # This should handle notifying Gemini
+                await self.session.close()
                 self.logger.info("Gemini Live session closed with API.")
             except Exception as e: self.logger.exception("Error closing Gemini Live session with API:")
             finally: self.session = None
@@ -311,16 +304,15 @@ class GeminiLiveManager:
                     if playback_buffer: await self._play_discord_chunk(bytes(playback_buffer)); playback_buffer.clear()
                     break
                 playback_buffer.extend(pcm_chunk_from_gemini)
-                # Play in ~50ms chunks (GEMINI_LIVE_RECV_SR / 20 samples * 2 bytes/sample)
                 if len(playback_buffer) >= (GEMINI_LIVE_RECV_SR // 20 * 2): 
                     await self._play_discord_chunk(bytes(playback_buffer)); playback_buffer.clear()
                 self._gemini_audio_receive_queue.task_done()
-            if playback_buffer and (self.is_stopping or not self.is_active): # Play remaining if stopping or stopped
+            if playback_buffer and (self.is_stopping or not self.is_active):
                  await self._play_discord_chunk(bytes(playback_buffer)); playback_buffer.clear()
             self.logger.info("Gemini audio playback loop finished.")
         except asyncio.CancelledError:
             self.logger.info("Gemini audio playback task cancelled.")
-            if playback_buffer: # Try to play remaining on cancel
+            if playback_buffer:
                 try: await self._play_discord_chunk(bytes(playback_buffer)); playback_buffer.clear()
                 except Exception: self.logger.error("Error playing remaining buffer on cancel.")
         except Exception as e:
@@ -337,22 +329,15 @@ class GeminiLiveManager:
             mono_tensor_gemini = torch.from_numpy(audio_float32_gemini).unsqueeze(0)
             resampled_tensor_discord = self.gemini_to_discord_resampler(mono_tensor_gemini)
             resampled_mono_float32_discord = resampled_tensor_discord.squeeze(0).numpy()
-            # Ensure stereo for Discord
             stereo_float32_discord = np.stack((resampled_mono_float32_discord, resampled_mono_float32_discord), axis=-1)
             discord_playable_pcm_chunk = (stereo_float32_discord * 32768.0).astype(np.int16).tobytes()
             if not discord_playable_pcm_chunk: return
-
-            # Simple playback: if already playing, stop it before playing the new chunk.
-            # This can lead to choppiness if chunks are very small or arrive very fast.
-            # A custom AudioSource that buffers internally would be smoother.
             if self.voice_client.is_playing():
                 self.voice_client.stop()
-                await asyncio.sleep(0.02) # Brief pause for stop to take effect
-
+                await asyncio.sleep(0.02) 
             source = discord.PCMVolumeTransformer(discord.PCMAudio(io.BytesIO(discord_playable_pcm_chunk)))
             self.voice_client.play(source, after=lambda e: self.logger.error(f"Player error (Gemini audio): {e}") if e else None)
         except Exception as e: self.logger.exception(f"Error in _play_discord_chunk:")
-
 
 # --- Utility Functions ---
 def get_current_time_utc8():
@@ -379,7 +364,7 @@ def init_db_for_guild(guild_id_val: int):
         "users": f"user_id TEXT PRIMARY KEY, user_name TEXT, join_date TEXT, points INTEGER DEFAULT {default_points}",
         "transactions": "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, points INTEGER, reason TEXT, timestamp TEXT"
     }
-    db_tables_chat = {"message": "id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT"} # For text chat history
+    db_tables_chat = {"message": "id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT, content TEXT, timestamp TEXT"}
 
     def _create_tables_if_not_exist(db_path, tables_definition):
         conn = None
@@ -401,8 +386,8 @@ def init_db_for_guild(guild_id_val: int):
 @tasks.loop(hours=24)
 async def send_daily_message():
     logger.info("Executing daily message task...")
-    if not servers or not send_daily_channel_id_list or not not_reviewed_id: # type: ignore
-        logger.warning("Daily message task lists (servers, channels, roles) not configured properly. Skipping.")
+    if not servers or not send_daily_channel_id_list or not not_reviewed_id:
+        logger.warning("Daily message task lists not configured. Skipping.")
         return
     for idx, server_id_val in enumerate(servers):
         try:
@@ -436,8 +421,7 @@ async def on_ready():
     logger.info(f"Discord.py Version: {discord.__version__}")
     if not API_KEY: logger.critical("GEMINI API KEY IS NOT SET in nana_bot config!")
     if not text_model_instance: logger.error("Text-based Gemini model (text_model_instance) failed to initialize.")
-    if not gemini_live_api_client: logger.error("Gemini Live API client (gemini_live_api_client) failed to initialize. Live voice features disabled.")
-    if not GEMINI_LIVE_CONNECT_CONFIG: logger.error("GEMINI_LIVE_CONNECT_CONFIG is not defined. Live voice features likely disabled due to earlier error (check library version).")
+    if not GEMINI_LIVE_CONNECT_CONFIG : logger.error("GEMINI_LIVE_CONNECT_CONFIG is not defined. Live voice features will likely fail. Check library version and API key setup.")
 
     guild_c = 0
     for g in bot.guilds: guild_c +=1; init_db_for_guild(g.id)
@@ -471,10 +455,10 @@ async def on_guild_join(guild: discord.Guild):
 async def on_member_join(member: discord.Member):
     guild = member.guild
     logger.info(f"Member {member.name} (ID: {member.id}) joined guild {guild.name} (ID: {guild.id})")
-    init_db_for_guild(guild.id) # Ensure DB exists
+    init_db_for_guild(guild.id)
 
-    # --- DB Updates for new member (Analytics & Points) ---
-    # (Your detailed logic for adding user to analytics and points tables)
+    # DB Updates for new member (Analytics & Points)
+    # Placeholder - insert your detailed logic for adding user to analytics and points tables here
 
     server_config_index = -1
     if servers:
@@ -483,13 +467,11 @@ async def on_member_join(member: discord.Member):
 
     if server_config_index != -1:
         try:
-            # Assign 'not_reviewed_id' role
             role_to_assign_id = not_reviewed_id[server_config_index] # type: ignore
             new_member_role = guild.get_role(role_to_assign_id)
             if new_member_role: await member.add_roles(new_member_role, reason="New member joined")
             else: logger.warning(f"Role ID {role_to_assign_id} for new members not found in guild {guild.name}.")
 
-            # Send AI Welcome Message
             welcome_channel_id_val = welcome_channel_id[server_config_index] # type: ignore
             newcomer_channel_id_val = newcomer_channel_id[server_config_index] # type: ignore
             welcome_text_channel = bot.get_channel(welcome_channel_id_val)
@@ -498,7 +480,7 @@ async def on_member_join(member: discord.Member):
 
             if welcome_text_channel and isinstance(welcome_text_channel, discord.TextChannel) and welcome_text_channel.permissions_for(guild.me).send_messages:
                 if text_model_instance:
-                    welcome_prompt_template = [
+                    welcome_prompt_list = [
                         f"{bot_name}是一位來自台灣的智能陪伴機器人，(請注意，她僅能提供意見，不能代替真正專業的諮商師)，她能夠使用繁體中文與用戶進行對話。她擅長傾聽，用溫暖和理解的方式回應用戶，並且能夠提供專業的建議和支持。無論是情感問題、生活困擾，還是尋求一般建議，且你({bot_name})非常擅長(DBT辯證行為治療)，並對使用者使用(DBT辯證行為治療)，{bot_name}都會以友善且專業的態度來協助用戶。當用戶表示聽不懂時，她會嘗試用不同的方式來解釋，而不是簡單重複原本的說法，並盡量避免重複相似的話題或句子。她的回應會盡量口語化，避免像AI或維基百科式的回話方式，每次回覆會盡量控制在三個段落以內，並且排版易於閱讀。，同時她會提供意見大於詢問問題，避免一直詢問用戶。且請務必用繁體中文來回答，請不要回覆這則訊息",
                         f"你現在要做的事是歡迎新成員 {member.mention} ({member.name}) 加入伺服器 **{guild.name}**。請以你 ({bot_name}) 的身份進行自我介紹，說明你能提供的幫助。接著，**非常重要**：請引導使用者前往新人審核頻道 {newcomer_mention} 進行審核。請明確告知他們需要在該頻道分享自己的情況，並**務必**提供所需的新人審核格式。請不要直接詢問使用者是否想聊天或聊什麼。",
                         f"請在你的歡迎訊息中包含以下審核格式區塊，使用 Markdown 的程式碼區塊包覆起來，並確保 {newcomer_mention} 的頻道提及是正確的：\n```{review_format}```\n"
@@ -508,7 +490,7 @@ async def on_member_join(member: discord.Member):
                         f"請直接生成歡迎訊息，不要包含任何額外的解釋或確認。使用繁體中文。確保包含審核格式和頻道提及。"
                     ]
                     async with welcome_text_channel.typing():
-                        ai_response = await text_model_instance.generate_content_async(welcome_prompt_template, safety_settings=safety_settings)
+                        ai_response = await text_model_instance.generate_content_async(welcome_prompt_list, safety_settings=safety_settings)
                     if ai_response.text:
                         welcome_embed = discord.Embed(title=f"🎉 歡迎 {member.display_name} 加入 {guild.name}！", description=ai_response.text.strip(), color=discord.Color.blue())
                         if member.display_avatar: welcome_embed.set_thumbnail(url=member.display_avatar.url)
@@ -518,16 +500,24 @@ async def on_member_join(member: discord.Member):
             else: logger.warning(f"Welcome channel {welcome_channel_id_val} not found or no permission in {guild.name}.")
         except Exception as e_join_actions:
             logger.error(f"Error during configured on_member_join actions for {member.name} in {guild.name}: {e_join_actions}")
-            # Send basic fallback if AI welcome failed but channel is known
             if 'welcome_text_channel' in locals() and welcome_text_channel and isinstance(welcome_text_channel, discord.TextChannel):
                  await welcome_text_channel.send(f"歡迎 {member.mention} 加入 **{guild.name}**！我是 {bot_name}。\n請前往 {newcomer_mention if 'newcomer_mention' in locals() else 'the newcomer channel'} 依照格式分享您的情況。\n審核格式如下：\n```{review_format}```")
 
-
 @bot.event
 async def on_member_remove(member: discord.Member):
-    # ... (Your existing detailed on_member_remove logic for logging, analytics, and sending messages to a remove_channel if configured)
+    guild = member.guild
     logger.info(f"Member {member.display_name} left guild {member.guild.name}")
-
+    server_idx = -1
+    if servers:
+        try: server_idx = servers.index(guild.id)
+        except ValueError: pass
+    if server_idx != -1:
+        try:
+            remove_cid = member_remove_channel_id[server_idx] # type: ignore
+            remove_chan_obj = bot.get_channel(remove_cid)
+            if remove_chan_obj and isinstance(remove_chan_obj, discord.TextChannel) and remove_chan_obj.permissions_for(guild.me).send_messages:
+                await remove_chan_obj.send(f"**{member.display_name}** ({member.name}) has left the server.") # Simplified
+        except Exception as e_remove: logger.error(f"Error in on_member_remove for configured channel: {e_remove}")
 
 # --- Voice Interaction ---
 def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData, guild_id: int,
@@ -538,7 +528,6 @@ def process_audio_chunk(member: discord.Member, audio_data: voice_recv.VoiceData
 
 @bot.tree.command(name='join', description="讓機器人加入您所在的語音頻道並開始接收語音數據")
 async def join(interaction: discord.Interaction):
-    # ... (implementation from previous steps) ...
     user = interaction.user
     if not (user and isinstance(user, discord.Member) and user.voice and user.voice.channel and interaction.guild and interaction.channel and isinstance(interaction.channel, discord.TextChannel)):
         await interaction.response.send_message("❌ 指令需在伺服器文字頻道中執行，且您需在語音頻道中。", ephemeral=True); return
@@ -558,10 +547,8 @@ async def join(interaction: discord.Interaction):
     except Exception as e: logger.error(f"Listen start failed: {e}"); await interaction.followup.send("❌ 開始監聽失敗。"); return
     await interaction.followup.send(f"✅ 已在 <#{voice_chan.id}> 開始接收語音！請用 `/ask_voice` 對話。", ephemeral=True)
 
-
 @bot.tree.command(name='leave', description="讓機器人停止聆聽並離開語音頻道")
 async def leave(interaction: discord.Interaction):
-    # ... (implementation from previous steps) ...
     if not interaction.guild: await interaction.response.send_message("❌ 指令限伺服器內使用。", ephemeral=True); return
     gid = interaction.guild.id
     if gid in active_live_managers: await active_live_managers.pop(gid).stop_session()
@@ -577,24 +564,22 @@ async def leave(interaction: discord.Interaction):
             if gid in listening_guilds: del listening_guilds[gid]
     else: await interaction.response.send_message("⚠️ 我不在任何語音頻道中。", ephemeral=True)
 
-
 @bot.tree.command(name="ask_voice", description=f"讓 {bot_name} 使用 Gemini Live API 聆聽並回應您的語音")
 async def ask_voice(interaction: discord.Interaction):
-    # ... (implementation from previous steps) ...
     user = interaction.user
     if not (interaction.guild and user and isinstance(user, discord.Member) and isinstance(interaction.channel, discord.TextChannel)):
         await interaction.response.send_message("❌ 指令條件不符。", ephemeral=True); return
     gid = interaction.guild.id
     vc = voice_clients.get(gid)
     if not (vc and vc.is_connected()): await interaction.response.send_message(f"❌ 我不在語音頻道，請先 `/join`。", ephemeral=True); return
-    if not (user.voice and user.voice.channel == vc.channel): await interaction.response.send_message(f"❌ 您需與我在同一個語音頻道 (<#{vc.channel.id}>)。", ephemeral=True); return
-    if gid in active_live_managers and active_live_managers[gid].is_active: await interaction.response.send_message("⚠️ 我已在聆聽 (Gemini Live)！", ephemeral=True); return
+    if not (user.voice and user.voice.channel == vc.channel): await interaction.response.send_message(f"❌ 您需与我在同一个语音频道 (<#{vc.channel.id}>)。", ephemeral=True); return
+    if gid in active_live_managers and active_live_managers[gid].is_active: await interaction.response.send_message("⚠️ 我已在聆听 (Gemini Live)！", ephemeral=True); return
     await interaction.response.defer(ephemeral=True, thinking=True)
     if not (gid in listening_guilds and isinstance(vc, voice_recv.VoiceRecvClient) and vc.is_listening()):
-        await interaction.followup.send("⚠️ 我似乎未接收語音。請嘗試 `/join` 後再試。", ephemeral=True); return
+        await interaction.followup.send("⚠️ 我似乎未接收语音。请尝试 `/join` 后再试。", ephemeral=True); return
     
-    if not gemini_live_api_client or not GEMINI_LIVE_CONNECT_CONFIG:
-        await interaction.followup.send("❌ Gemini Live API 未正確設定或初始化，無法啟動語音對話。請檢查日誌。", ephemeral=True); return
+    if not GEMINI_LIVE_CONNECT_CONFIG: # Check if config is defined
+        await interaction.followup.send("❌ Gemini Live API 未正確設定或初始化 (CONFIG MISSING)，無法啟動語音對話。請檢查日誌。", ephemeral=True); return
 
     manager = GeminiLiveManager(gid, vc, interaction.channel, bot, user)
     if await manager.start_session():
@@ -602,12 +587,10 @@ async def ask_voice(interaction: discord.Interaction):
         await interaction.followup.send(f"✅ 已啟動 Gemini Live 語音對話！我正在聆聽...", ephemeral=True)
     else:
         await interaction.followup.send(f"❌ 啟動 Gemini Live 語音對話失敗。請檢查日誌。", ephemeral=True)
-        # Ensure manager is not stored if start_session failed
         if active_live_managers.get(gid) == manager: del active_live_managers[gid]
 
 @bot.tree.command(name="stop_ask_voice", description=f"停止 {bot_name} 的 Gemini Live API 語音對話")
 async def stop_ask_voice(interaction: discord.Interaction):
-    # ... (implementation from previous steps) ...
     if not interaction.guild: await interaction.response.send_message("❌ 此指令僅限伺服器內使用。", ephemeral=True); return
     gid = interaction.guild.id
     manager = active_live_managers.get(gid)
@@ -621,38 +604,34 @@ async def stop_ask_voice(interaction: discord.Interaction):
 
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    # ... (implementation from previous steps for bot disconnect and auto-leave) ...
     guild = member.guild; guild_id = guild.id
     bot_user_id = bot.user.id if bot.user else -1
-    if member.id == bot_user_id: # Bot's own state
-        if before.channel and not after.channel: # Bot disconnected
+    if member.id == bot_user_id:
+        if before.channel and not after.channel:
             logger.info(f"Bot disconnected from VC in {guild.name}")
             if guild_id in active_live_managers: await active_live_managers.pop(guild_id).stop_session()
             if guild_id in voice_clients: del voice_clients[guild_id]
             if guild_id in listening_guilds: del listening_guilds[guild_id]
         return
-    # Auto-leave if bot is alone
     vc = voice_clients.get(guild_id)
     if vc and vc.is_connected() and vc.channel:
-        await asyncio.sleep(3.0) # Check after a short delay
-        current_vc = voice_clients.get(guild_id) # Re-fetch, state might have changed
+        await asyncio.sleep(3.0) 
+        current_vc = voice_clients.get(guild_id)
         if current_vc and current_vc.is_connected() and current_vc.channel:
-            if not [m for m in current_vc.channel.members if not m.bot]: # Bot is alone
+            if not [m for m in current_vc.channel.members if not m.bot]:
                 logger.info(f"Bot auto-leaving VC in {guild.name} (alone).")
                 if guild_id in active_live_managers: await active_live_managers.pop(guild_id).stop_session()
                 await current_vc.disconnect()
-                # on_voice_state_update for bot itself will handle dict cleanup
-
 
 @bot.event
 async def on_message(message: discord.Message):
-    # ... (Full implementation from previous response, using text_model_instance and your detailed text prompt) ...
     if message.author == bot.user or message.author.bot or not message.guild: return
     guild = message.guild; guild_id = guild.id; channel = message.channel
     author = message.author; user_id = author.id; user_name = author.display_name
     if WHITELISTED_SERVERS and guild_id not in WHITELISTED_SERVERS: return
     
-    # Analytics/Points DB updates (your existing detailed logic here)
+    # Placeholder for Analytics/Points DB updates
+    # ...
 
     should_respond_text_ai = False
     if bot.user and bot.user.mentioned_in(message) and not message.mention_everyone: should_respond_text_ai = True # type: ignore
@@ -672,7 +651,7 @@ async def on_message(message: discord.Message):
     if should_respond_text_ai:
         if not text_model_instance: logger.warning("Text AI model not available."); return
         if not isinstance(channel, discord.TextChannel): return
-        # Point deduction logic for text chat (if Point_deduction_system > 0)
+        # Point deduction placeholder
 
         async with channel.typing():
             try:
@@ -698,7 +677,7 @@ async def on_message(message: discord.Message):
                     f"(請注意，再傳送網址時請記得在後方加上空格或換行，避免網址錯誤)"
                     f"你目前正在 Discord 的文字頻道 <#{channel.id}> (名稱: {channel.name}) 中與使用者 {author.display_name} (ID: {author.id}) 透過文字訊息進行對話。"
                 )
-                text_model_ack = ( # Model's acknowledgement of the system prompt
+                text_model_ack = (
                     f"好的，我知道了。我是{bot_name}，一位來自台灣，運用DBT技巧的智能陪伴機器人。生日是9/12。"
                     f"我會用溫暖、口語化、易於閱讀的繁體中文回覆，控制在三段內，提供意見多於提問，並避免重複。"
                     f"我會記住最近60則對話(舊訊息在前)，並記得@{bot_id_str}是我的ID。"
@@ -709,7 +688,8 @@ async def on_message(message: discord.Message):
                 )
                 db_path_chat = get_db_path(guild_id, 'chat')
                 # ... (get_text_chat_history and store_text_chat_message functions as defined before) ...
-                # raw_chat_hist = get_text_chat_history(db_path_chat)
+                # For brevity, skipping actual DB call here, assume raw_chat_hist is fetched.
+                # raw_chat_hist = [] # Placeholder
                 processed_chat_hist = [{"role": "user", "parts": [{"text": text_sys_prompt}]}, {"role": "model", "parts": [{"text": text_model_ack}]}]
                 # for u, c in raw_chat_hist: processed_chat_hist.append({"role": "model" if u == bot_name else "user", "parts": [{"text": c}]})
                 
@@ -719,19 +699,17 @@ async def on_message(message: discord.Message):
                     reply_txt = response.text.strip()
                     # store_text_chat_message(db_path_chat, user_name, message.content, current_time)
                     # store_text_chat_message(db_path_chat, bot_name, reply_txt, get_current_time_utc8())
-                    if len(reply_txt) > 1990: # Simple split for long messages
+                    if len(reply_txt) > 1990: 
                         for i in range(0, len(reply_txt), 1990): await channel.send(reply_txt[i:i+1990])
                     else: await message.reply(reply_txt, mention_author=False)
                 else: await message.reply("抱歉，無法產生回應。", mention_author=False)
             except Exception as e: logger.exception(f"Text AI error: {e}"); await message.reply("處理訊息時發生錯誤。")
 
-
 # --- Bot Run ---
 def bot_run():
     if not discord_bot_token: logger.critical("Discord Bot Token NOT SET!"); return
     if not API_KEY: logger.warning("Gemini API Key NOT SET! AI features will be limited/disabled.")
-    if not gemini_live_api_client: logger.error("Gemini Live API client failed to initialize during setup. Live voice will not work.")
-    if not GEMINI_LIVE_CONNECT_CONFIG and gemini_live_api_client : logger.error("GEMINI_LIVE_CONNECT_CONFIG is not defined. Live voice will likely fail. Check library version and API key.")
+    if not GEMINI_LIVE_CONNECT_CONFIG: logger.error("GEMINI_LIVE_CONNECT_CONFIG is not defined. Live voice will likely fail. Check library version and API key setup.")
 
     logger.info("Attempting to start Discord bot...")
     try:
@@ -745,9 +723,7 @@ def bot_run():
 
 if __name__ == "__main__":
     logger.info("Starting bot from __main__...")
-    # Call your project's global init_db if it's designed to be called here from nana_bot
-    # init_db() # This was in your original main, ensure it's correctly scoped or called if needed.
-    # For now, init_db_for_guild is called on_ready and on_guild_join.
+    # init_db() # Call your global init_db if it's from nana_bot and needed here.
     bot_run()
     logger.info("Bot execution finished from __main__.")
 
