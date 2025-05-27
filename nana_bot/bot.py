@@ -60,16 +60,18 @@ import functools
 import wave
 import uuid
 import io
-import base64 # For live API potentially, though not directly used in this audio-only path
+import base64
+
+import pyaudio # <--- ADD THIS LINE
 
 # --- Gemini Live API Specific Constants ---
 LIVE_API_SEND_SAMPLE_RATE = 16000
 LIVE_API_RECEIVE_SAMPLE_RATE = 24000
-LIVE_API_AUDIO_FORMAT = pyaudio.paInt16 # PyAudio might not be needed if not using its stream directly
+LIVE_API_AUDIO_FORMAT = pyaudio.paInt16 # Now pyaudio is defined
 LIVE_API_AUDIO_CHANNELS = 1
-LIVE_API_CHUNK_SIZE = 1024 # For feeding audio to Gemini
+LIVE_API_CHUNK_SIZE = 1024
 DISCORD_SR = 48000
-DISCORD_CHANNELS = 2 # Discord expects stereo
+DISCORD_CHANNELS = 2
 
 # --- Global for Gemini Live API Client ---
 gemini_live_client = None
