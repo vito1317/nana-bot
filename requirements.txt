@@ -22,5 +22,4 @@ google.cloud.speech_v1
 gapic-google-cloud-speech-v1
 whisper
 pyaudio
-portaudio19-dev
 git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git
