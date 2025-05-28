@@ -594,9 +594,8 @@ class GeminiLiveSink(AudioSink):
         except Exception as e:
             logger.error(f"Failed to create Opus decoder in GeminiLiveSink: {e}")
 
-
-    def write(self, data: voice_recv.VoiceData, user: discord.User):
-        if not self.gemini_session or user.id != self.user_id:
+    def write(self, ssrc: int, data: voice_recv.VoiceData):
+        if not self.gemini_session or not data.user or data.user.id != self.user_id:
             return
 
         vc = voice_clients.get(self.guild_id)
@@ -755,7 +754,7 @@ async def _receive_gemini_audio_task(guild_id: int):
                 except discord.HTTPException as e:
                     logger.error(f"Failed to send aggregated text from Live API to {text_channel.id}: {e}")
         
-        if guild_id in live_sessions and live_sessions[guild_id].get("audio_output_task") is asyncio.current_task():
+        if guild_id in live_sessions and "audio_output_task" in live_sessions[guild_id] and live_sessions[guild_id].get("audio_output_task") is asyncio.current_task():
              logger.info(f"Gemini receive task ended naturally for guild {guild_id}. Session might persist for user input or bot reply.")
 
 
@@ -783,14 +782,14 @@ async def _play_gemini_audio(guild_id: int):
             live_sessions[guild_id]["is_bot_speaking_live_api"] = False
             gemini_session = live_sessions[guild_id].get("session")
             text_channel = live_sessions[guild_id].get("text_channel")
-            current_bot_loop = bot.loop # Capture loop
+            current_bot_loop = bot.loop 
             
             if gemini_session:
                 logger.info(f"[_play_gemini_audio][AfterCallback] Bot finished speaking. Signaling end_of_turn to Gemini for guild {guild_id}.")
                 coro_send = gemini_session.send(input=".", end_of_turn=True)
                 asyncio.run_coroutine_threadsafe(coro_send, current_bot_loop)
                 
-                if text_channel: 
+                if text_channel and "user_object" in live_sessions[guild_id] and live_sessions[guild_id]["user_object"] is not None : 
                     try: 
                         msg_content = f"🎤 {live_sessions[guild_id]['user_object'].mention}, 你可以繼續說話了，或使用 `/stop_live_chat` 結束。"
                         coro_msg = text_channel.send(msg_content)
@@ -826,7 +825,10 @@ async def _cleanup_live_session(guild_id: int, reason: str = "Unknown"):
             current_sink = getattr(vc, '_sink', None) 
             if isinstance(current_sink, GeminiLiveSink) and current_sink.user_id == user_id:
                 logger.info(f"Stopping listening for GeminiLiveSink in guild {guild_id}")
-                vc.stop_listening()
+                try:
+                    vc.stop_listening()
+                except Exception as e:
+                    logger.error(f"Error stopping listening during cleanup: {e}")
 
 
         if audio_output_task and not audio_output_task.done():
@@ -935,7 +937,11 @@ async def leave(interaction: discord.Interaction):
 @bot.tree.command(name="live_chat", description=f"與 {bot_name} 開始即時語音對話 (使用 Gemini Live API)")
 async def live_chat(interaction: discord.Interaction):
     if gemini_live_client_instance is None:
-        await interaction.response.send_message("❌ 抱歉，AI語音對話功能目前無法使用 (Live Client 初始化失敗)。", ephemeral=True)
+        # Check if already responded (e.g. if defer was called before this check)
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ 抱歉，AI語音對話功能目前無法使用 (Live Client 初始化失敗)。", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ 抱歉，AI語音對話功能目前無法使用 (Live Client 初始化失敗)。", ephemeral=True)
         return
 
     guild_id = interaction.guild_id
@@ -945,34 +951,43 @@ async def live_chat(interaction: discord.Interaction):
         active_user_id = live_sessions[guild_id].get("user_id")
         active_user = interaction.guild.get_member(active_user_id) if active_user_id else None
         active_user_name = active_user.display_name if active_user else f"User ID {active_user_id}"
-        await interaction.response.send_message(f"⚠️ 目前已經有一個即時語音對話正在進行中 (由 {active_user_name} 發起)。請等待再試或請該用戶使用 `/stop_live_chat` 結束。", ephemeral=True)
+        msg = f"⚠️ 目前已經有一個即時語音對話正在進行中 (由 {active_user_name} 發起)。請等待再試或請該用戶使用 `/stop_live_chat` 結束。"
+        if not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            await interaction.followup.send(msg, ephemeral=True)
         return
+
+    # Defer ONCE here if no response has been made yet.
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
     vc = voice_clients.get(guild_id)
     if not vc or not vc.is_connected():
-        await interaction.response.send_message(f"❌ 我目前不在語音頻道中。請先使用 `/join` 加入，或我會嘗試加入您所在的頻道。", ephemeral=True)
         if user.voice and user.voice.channel:
             try:
-                await interaction.edit_original_response(content="⏳ 正在嘗試加入您的語音頻道...")
+                logger.info(f"User {user.id} initiated live_chat while bot not in VC. Attempting to join {user.voice.channel.name}.")
                 vc = await user.voice.channel.connect(cls=voice_recv.VoiceRecvClient, timeout=60.0, reconnect=True)
                 voice_clients[guild_id] = vc
-                await interaction.edit_original_response(content=f"✅ 已加入語音頻道 <#{user.voice.channel.id}>。")
+                # No message here, will be covered by "Starting session..."
             except Exception as e:
-                await interaction.edit_original_response(content=f"❌ 自動加入您的語音頻道失敗: {e}")
+                logger.error(f"Failed to auto-join voice channel for live_chat: {e}")
+                await interaction.edit_original_response(content=f"❌ 我需要先加入一個語音頻道。嘗試自動加入您的頻道失敗: {e}")
                 return
         else:
+            await interaction.edit_original_response(content=f"❌ 我目前不在語音頻道中，且您也需要先加入一個語音頻道。請先使用 `/join`。")
             return
 
     if not isinstance(vc, voice_recv.VoiceRecvClient):
-        await interaction.response.send_message("❌ 語音客戶端類型不正確，無法開始即時對話。請嘗試重新 `/join`。", ephemeral=True)
+        await interaction.edit_original_response(content="❌ 語音客戶端類型不正確，無法開始即時對話。請嘗試重新 `/join`。")
         logger.error(f"VoiceClient for guild {guild_id} is not VoiceRecvClient. Type: {type(vc)}")
         return
 
     if not user.voice or user.voice.channel != vc.channel:
-        await interaction.response.send_message(f"❌ 您需要和我在同一個語音頻道 (<#{vc.channel.id}>) 才能使用此指令。", ephemeral=True)
+        await interaction.edit_original_response(content=f"❌ 您需要和我在同一個語音頻道 (<#{vc.channel.id}>) 才能使用此指令。")
         return
-
-    await interaction.response.send_message(f"⏳ 正在啟動與 {bot_name} 的即時語音對話... 請等候。", ephemeral=True)
+    
+    await interaction.edit_original_response(content=f"⏳ 正在啟動與 {bot_name} 的即時語音對話... 請等候。")
 
     try:
         logger.info(f"Initiating Gemini Live session for guild {guild_id}, user {user.id}")
@@ -995,20 +1010,26 @@ async def live_chat(interaction: discord.Interaction):
                 "is_bot_speaking_tts": False
             }
 
-            recv_task = asyncio.create_task(_receive_gemini_audio_task(guild_id))
+            recv_task = bot.loop.create_task(_receive_gemini_audio_task(guild_id))
             live_sessions[guild_id]["audio_output_task"] = recv_task
-            asyncio.create_task(_play_gemini_audio(guild_id))
+            bot.loop.create_task(_play_gemini_audio(guild_id))
 
             sink = GeminiLiveSink(api_session, guild_id, user.id, interaction.channel)
             vc.listen(sink)
             logger.info(f"Bot is now listening for live chat in guild {guild_id} with GeminiLiveSink.")
-
+            
             await interaction.edit_original_response(content=f"✅ {bot_name} 正在聽你說話！請開始說話。使用 `/stop_live_chat` 結束。")
 
     except Exception as e:
         logger.exception(f"Error starting live_chat for guild {guild_id}: {e}")
-        await interaction.edit_original_response(content=f"❌ 啟動即時語音對話失敗: {e}")
+        try:
+            await interaction.edit_original_response(content=f"❌ 啟動即時語音對話失敗: {e}")
+        except discord.NotFound: # Original deferred message might have expired or been dismissed
+            await interaction.followup.send(f"❌ 啟動即時語音對話失敗: {e}", ephemeral=True)
+        except discord.InteractionResponded: # Should not happen if logic is correct, but as a fallback
+             await interaction.followup.send(f"❌ 啟動即時語音對話失敗: {e}", ephemeral=True)
         await _cleanup_live_session(guild_id, f"Failed to start: {e}")
+
 
 @bot.tree.command(name="stop_live_chat", description="結束目前的即時語音對話")
 async def stop_live_chat(interaction: discord.Interaction):
@@ -1246,7 +1267,7 @@ async def on_message(message: discord.Message):
                 cursor_chat.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
                                     (user_id, cleaned_message, current_time))
                 cursor_chat.execute("INSERT INTO message (user, content, timestamp) VALUES (?, ?, ?)",
-                                    (str(bot.user.id), ai_response_text, get_current_time_utc8())) # Use new time for bot response
+                                    (str(bot.user.id), ai_response_text, get_current_time_utc8())) 
                 conn_chat.commit()
                 conn_chat.close()
 
@@ -1263,7 +1284,7 @@ async def on_message(message: discord.Message):
             except Exception as e:
                 logger.exception(f"Error during Gemini text interaction for user {user_id}: {e}")
                 await channel.send(f"抱歉，我在處理您的請求時遇到了一些問題：{e}")
-                if Point_deduction_system[server_index] and current_points is not None: # Refund point on error
+                if Point_deduction_system[server_index] and current_points is not None: 
                     conn_points_refund = None
                     try:
                         conn_points_refund = sqlite3.connect(get_db_path(guild_id, 'points'), timeout=10)
