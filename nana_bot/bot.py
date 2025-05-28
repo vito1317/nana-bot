@@ -585,7 +585,7 @@ def resample_audio(pcm_data: bytes, original_sr: int, target_sr: int, num_channe
 
 
 # --- NEW: Gemini Live API Audio Handling ---
-class GeminiLiveSink(discord.AudioSink):
+class GeminiLiveSink(AudioSink):
     """Sends audio data from Discord to an active Gemini Live session."""
     def __init__(self, gemini_session, guild_id: int, user_id: int, text_channel: discord.TextChannel):
         super().__init__()
