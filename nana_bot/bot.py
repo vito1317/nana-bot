@@ -989,17 +989,14 @@ async def live_chat(interaction: discord.Interaction):
         active_user_id = live_sessions[guild_id].get("user_id")
         active_user = interaction.guild.get_member(active_user_id) if active_user_id else None
         active_user_name = active_user.display_name if active_user else f"User ID {active_user_id}"
-        await interaction.response.send_message(f"⚠️ 目前已經有一個即時語音對話正在進行中 (由 {active_user_name} 發起)。請稍後再試或請該用戶使用 `/stop_live_chat` 結束。", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ 目前已經有一個即時語音對話正在進行中 (由 {active_user_name} 發起)。請等待再試或請該用戶使用 `/stop_live_chat` 結束。", ephemeral=True)
         return
 
     vc = voice_clients.get(guild_id)
     if not vc or not vc.is_connected():
         await interaction.response.send_message(f"❌ 我目前不在語音頻道中。請先使用 `/join` 加入，或我會嘗試加入您所在的頻道。", ephemeral=True)
-        # Optionally, try to join automatically if user is in a channel
         if user.voice and user.voice.channel:
             try:
-                # await join.callback(bot, interaction) # This would re-trigger the join command
-                # Manual join to avoid complex callback chain
                 await interaction.edit_original_response(content="⏳ 正在嘗試加入您的語音頻道...")
                 vc = await user.voice.channel.connect(cls=voice_recv.VoiceRecvClient, timeout=60.0, reconnect=True)
                 voice_clients[guild_id] = vc
@@ -1007,74 +1004,55 @@ async def live_chat(interaction: discord.Interaction):
             except Exception as e:
                 await interaction.edit_original_response(content=f"❌ 自動加入您的語音頻道失敗: {e}")
                 return
-        else: # User not in a channel, and bot not in one either
+        else:
             return
-
 
     if not isinstance(vc, voice_recv.VoiceRecvClient):
         await interaction.response.send_message("❌ 語音客戶端類型不正確，無法開始即時對話。請嘗試重新 `/join`。", ephemeral=True)
         logger.error(f"VoiceClient for guild {guild_id} is not VoiceRecvClient. Type: {type(vc)}")
         return
-    
+
     if not user.voice or user.voice.channel != vc.channel:
         await interaction.response.send_message(f"❌ 您需要和我在同一個語音頻道 (<#{vc.channel.id}>) 才能使用此指令。", ephemeral=True)
         return
 
-    await interaction.response.send_message(f"⏳ 正在啟動與 {bot_name} 的即時語音對話... 請稍候。", ephemeral=True)
+    await interaction.response.send_message(f"⏳ 正在啟動與 {bot_name} 的即時語音對話... 請等候。", ephemeral=True)
 
     try:
         logger.info(f"Initiating Gemini Live session for guild {guild_id}, user {user.id}")
-        api_session = await gemini_live_client_instance.aio.live.connect(
-            model=GEMINI_LIVE_MODEL_NAME, # Ensure this model supports audio streaming I/O
-            config=GEMINI_LIVE_CONNECT_CONFIG, # If using LiveConnectConfig
-            # Or for generate_content style streaming with audio, it might be:
-            # model=gemini_live_client_instance.get_model(GEMINI_LIVE_MODEL_NAME)
-            # and then use `model.generate_content(..., stream=True)` with audio chunks.
-            # The user example used `client.aio.live.connect`, so sticking to that.
-        )
-        logger.info(f"Gemini Live session established for guild {guild_id}")
+        async with gemini_live_client_instance.aio.live.connect(
+            model=GEMINI_LIVE_MODEL_NAME,
+            config=GEMINI_LIVE_CONNECT_CONFIG
+        ) as api_session:
 
-        playback_queue = asyncio.Queue()
-        live_sessions[guild_id] = {
-            "session": api_session,
-            "playback_queue": playback_queue,
-            "user_id": user.id,
-            "user_object": user,
-            "text_channel": interaction.channel, # For sending text transcriptions or messages
-            "audio_output_task": None, # Will be set below
-            "is_bot_speaking_live_api": False, # Flag for when bot is playing Gemini's audio
-            "is_bot_speaking_tts": False # Flag for when bot is playing EdgeTTS audio
-        }
+            logger.info(f"Gemini Live session established for guild {guild_id}")
 
-        # Start task to receive audio from Gemini
-        recv_task = asyncio.create_task(_receive_gemini_audio_task(guild_id))
-        live_sessions[guild_id]["audio_output_task"] = recv_task
-        
-        # Start task to play received audio (this will start GeminiAudioStreamSource)
-        # No, we don't start a separate task for playing. vc.play handles that.
-        # We just need to ensure the source is created when audio is first available.
-        # For now, we can initiate playback immediately. It will wait for queue.
-        asyncio.create_task(_play_gemini_audio(guild_id))
+            playback_queue = asyncio.Queue()
+            live_sessions[guild_id] = {
+                "session": api_session,
+                "playback_queue": playback_queue,
+                "user_id": user.id,
+                "user_object": user,
+                "text_channel": interaction.channel,
+                "audio_output_task": None,
+                "is_bot_speaking_live_api": False,
+                "is_bot_speaking_tts": False
+            }
 
+            recv_task = asyncio.create_task(_receive_gemini_audio_task(guild_id))
+            live_sessions[guild_id]["audio_output_task"] = recv_task
+            asyncio.create_task(_play_gemini_audio(guild_id))
 
-        # Start listening to user audio with the custom sink
-        sink = GeminiLiveSink(api_session, guild_id, user.id, interaction.channel)
-        vc.listen(sink)
-        logger.info(f"Bot is now listening for live chat in guild {guild_id} with GeminiLiveSink.")
+            sink = GeminiLiveSink(api_session, guild_id, user.id, interaction.channel)
+            vc.listen(sink)
+            logger.info(f"Bot is now listening for live chat in guild {guild_id} with GeminiLiveSink.")
 
-        await interaction.edit_original_response(content=f"✅ {bot_name} 正在聆聽！請開始說話。使用 `/stop_live_chat` 結束。")
-        
-        # Send initial "system" message or context to Gemini if needed.
-        # For native audio dialog models, just speaking might be enough.
-        # For multimodal models, you might send an initial text prompt here.
-        # await api_session.send(input=f"New conversation started with user {user.display_name}. The bot's name is {bot_name}. Current time is {get_current_time_utc8()}", end_of_turn=True)
-
+            await interaction.edit_original_response(content=f"✅ {bot_name} 正在聽你說話！請開始說話。使用 `/stop_live_chat` 結束。")
 
     except Exception as e:
         logger.exception(f"Error starting live_chat for guild {guild_id}: {e}")
         await interaction.edit_original_response(content=f"❌ 啟動即時語音對話失敗: {e}")
         await _cleanup_live_session(guild_id, f"Failed to start: {e}")
-
 
 @bot.tree.command(name="stop_live_chat", description="結束目前的即時語音對話")
 async def stop_live_chat(interaction: discord.Interaction):
