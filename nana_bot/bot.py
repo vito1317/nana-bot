@@ -419,7 +419,7 @@ async def on_ready():
         for guild in bot.guilds:
             try:
                 # bot.tree.copy_global_to(guild=guild) # If you want global commands on specific guilds
-                synced_guild = await bot.tree.sync(guild=guild)
+                synced_guild = await bot.tree.sync()
                 logger.debug(f"已為伺服器 {guild.id} ({guild.name}) 同步 {len(synced_guild)} 個命令。")
             except discord.errors.Forbidden: logger.warning(f"無法為伺服器 {guild.id} ({guild.name}) 同步命令 (權限不足)。")
             except discord.HTTPException as e: logger.error(f"為伺服器 {guild.id} ({guild.name}) 同步命令時發生 HTTP 錯誤: {e}")
