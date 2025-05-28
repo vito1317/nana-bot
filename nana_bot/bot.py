@@ -275,12 +275,12 @@ def get_current_time_utc8():
     return current_time.strftime("%Y-%m-%d %H:%M:%S")
 
 # Initialize Gemini Text Model (original)
-genai.configure(api_key=API_KEY)
+genai.Client(api_key=API_KEY)
 text_model = None # For standard text chat
 try:
     if not API_KEY:
         raise ValueError("Gemini API key is not set for text model.")
-    text_model = genai.GenerativeModel(gemini_model_name) # Using the renamed config variable
+    text_model = genai_client.get_model(gemini_model_name) # Using the renamed config variable
     logger.info(f"成功初始化 GenerativeModel (Text): {gemini_model_name}")
 except Exception as e:
     logger.critical(f"初始化 GenerativeModel (Text) 失敗: {e}")
