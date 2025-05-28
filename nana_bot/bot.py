@@ -12,8 +12,8 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta, timezone
 import json
-import google.generativeai as genai
-from google.generativeai import types as genai_types # Renamed to avoid conflict
+#import google.generativeai as genai
+#from google.generativeai import types as types # Renamed to avoid conflict
 from google import genai
 from google.genai import types
 import requests
@@ -145,10 +145,10 @@ voice_clients: Dict[int, discord.VoiceClient] = {} # Stores current voice client
 # QUERY_TIMEOUT_SECONDS = 30
 
 safety_settings = {
-    genai_types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai_types.HarmBlockThreshold.BLOCK_NONE,
-    genai_types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai_types.HarmBlockThreshold.BLOCK_NONE,
-    genai_types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai_types.HarmBlockThreshold.BLOCK_NONE,
-    genai_types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai_types.HarmBlockThreshold.BLOCK_NONE,
+    types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: types.HarmBlockThreshold.BLOCK_NONE,
+    types.HarmCategory.HARM_CATEGORY_HARASSMENT: types.HarmBlockThreshold.BLOCK_NONE,
+    types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: types.HarmBlockThreshold.BLOCK_NONE,
+    types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: types.HarmBlockThreshold.BLOCK_NONE,
 }
 
 DEFAULT_VOICE = "zh-TW-HsiaoYuNeural" # For EdgeTTS
