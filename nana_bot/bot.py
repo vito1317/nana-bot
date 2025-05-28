@@ -22,7 +22,7 @@ import time
 import re
 import pytz
 from collections import defaultdict, deque
-
+from typing import Optional, Dict, Set, Any, List, Tuple, Union
 
 import queue # Standard queue, asyncio.Queue will be used for async tasks
 import threading # Less used with asyncio, but good to be aware of
@@ -81,7 +81,7 @@ import io
 
 
 # --- NEW: Gemini Live API Specific Globals & Config ---
-gemini_live_client: Optional[genai.GenerativeModel] = None # Will be the Live API client
+gemini_live_client: Optional[Any] = None # Will be the Live API client
 live_sessions: Dict[int, Dict[str, Any]] = {} # Stores active live session info per guild_id
 # Example: live_sessions[guild_id] = {
 #    "session": <Gemini Live Session>,
