@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 import json
 import google.generativeai as genai
 from google.generativeai import types as genai_types # Renamed to avoid conflict
+from google import genai
+from google.genai import types
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -97,7 +99,7 @@ GEMINI_LIVE_MODEL_NAME = "models/gemini-1.5-flash-latest" # Or your preferred st
 # Configuration for Gemini Live API
 # This config is for models that take audio as part of a multimodal turn.
 # For native audio dialog models, the config might be simpler or implicit.
-GEMINI_LIVE_CONFIG = genai_types.GenerationConfig(
+GEMINI_LIVE_CONFIG = types.GenerationConfig(
     # For multimodal models, you might need to specify tools if you want function calling along with audio.
     # For native audio dialog models, this might not be needed or configured differently.
     # The `response_mime_type="audio/wav"` or similar is key if supported.
@@ -113,17 +115,17 @@ GEMINI_LIVE_CONFIG = genai_types.GenerationConfig(
 # or specific Google voices if listed in their TTS documentation.
 # For "native-audio-dialog" models, the voice might be part of the model itself.
 # Let's assume a generic placeholder or that the model handles it.
-GEMINI_LIVE_CONNECT_CONFIG = genai_types.LiveConnectConfig(
-    response_modalities=[genai_types.ResponseModality.AUDIO], # Request audio response
-    speech_config=genai_types.SpeechConfig(
-        voice_config=genai_types.VoiceConfig(
-            # prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(voice_name="Zephyr") # Check availability
+GEMINI_LIVE_CONNECT_CONFIG = types.LiveConnectConfig(
+    response_modalities=[types.ResponseModality.AUDIO], # Request audio response
+    speech_config=types.SpeechConfig(
+        voice_config=types.VoiceConfig(
+            # prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr") # Check availability
             # Using a more common pattern or letting API pick if specific voice isn't critical/known
         )
     ),
-    # context_window_compression=genai_types.ContextWindowCompressionConfig( # Optional
+    # context_window_compression=types.ContextWindowCompressionConfig( # Optional
     #     trigger_tokens=25600,
-    #     sliding_window=genai_types.SlidingWindow(target_tokens=12800),
+    #     sliding_window=types.SlidingWindow(target_tokens=12800),
     # ),
 )
 # Use 16kHz for sending to Gemini, as it's common for STT

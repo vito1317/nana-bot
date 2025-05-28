@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="nana-bot",
-    version="5.8.9.9.8.8.7.7.6.6.5.5.4.8",
+    version="5.8.9.9.8.8.7.7.6.6.5.5.4.9",
     license="MIT",
     author="Vito1317",
     author_email="service@vito1317.com",
@@ -48,6 +48,10 @@ setuptools.setup(
         "soundfile",
         "discord-ext-voice-recv[extras]",
         "whisper",
+        "google.genai",
+        "opencv-python",
+        "pillow",
+        "mss"
         #"pyaudio"
         #"gapic-google-cloud-speech-v1",
         #"discord-ext-voice-recv @ git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git@main",
