@@ -591,56 +591,41 @@ class GeminiLiveSink(AudioSink):
         super().__init__()
         self.gemini_session = gemini_session
         self.guild_id = guild_id
-        self.user_id = user_id # Only process audio from this user
+        self.user_id = user_id
         self.text_channel = text_channel
         self.opus_decoder = opus.Decoder(discord.opus.SAMPLING_RATE, discord.opus.CHANNELS)
 
-
-    def write(self, data: voice_recv.VoiceData, user: discord.User): # data is actually discord.VoiceSSRC with .pcm after decoding
-        # data is an instance of discord.voice_recv.VoiceData
-        # data.user, data.pcm, data.opus (if not decoded yet by VoiceRecvClient)
+    def write(self, data: voice_recv.VoiceData, user: discord.User):
         if not self.gemini_session or user.id != self.user_id:
             return
 
         vc = voice_clients.get(self.guild_id)
-        if vc and vc.is_playing(): # If bot is speaking, don't send user audio
-            # logger.debug(f"[GeminiLiveSink] Bot is playing audio, discarding user {user.id} audio.")
+        if vc and vc.is_playing():
             return
-        
-        # Check if the bot itself is generating TTS via EdgeTTS (a more specific check)
+
         if self.guild_id in live_sessions and live_sessions[self.guild_id].get("is_bot_speaking_tts", False):
             return
 
-
-        # Assuming data.pcm is available (VoiceRecvClient usually decodes)
-        # Discord's PCM is typically 48kHz, 2-channel, 16-bit
-        # We need to resample it to 16kHz, 1-channel for Gemini
         original_pcm = data.pcm
         if not original_pcm:
-             # Opus data might be in data.opus if not pre-decoded
-             # This part is more complex if you need to handle Opus decoding manually.
-             # VoiceRecvClient with a simple sink usually provides .pcm
-             logger.warning(f"[GeminiLiveSink] No PCM data received for user {user.id}. Opus data: {data.opus is not None}")
-             if data.opus:
-                 try:
-                     original_pcm = self.opus_decoder.decode(data.opus, fec=False)
-                 except opus.OpusError as e:
-                     logger.error(f"Opus decode error: {e}")
-                     return
-             else:
-                 return
+            if data.opus:
+                try:
+                    original_pcm = self.opus_decoder.decode(data.opus, fec=False)
+                except opus.OpusError as e:
+                    logger.error(f"Opus decode error: {e}")
+                    return
+            else:
+                return
 
-
-        # logger.debug(f"[GeminiLiveSink] Received {len(original_pcm)} bytes PCM from {user.display_name} (SR: 48k, Stereo)")
-        resampled_mono_pcm = resample_audio(original_pcm,
-                                            discord.opus.SAMPLING_RATE, # 48000
-                                            GEMINI_AUDIO_INPUT_SAMPLING_RATE, # 16000
-                                            discord.opus.CHANNELS) # 2
+        resampled_mono_pcm = resample_audio(
+            original_pcm,
+            discord.opus.SAMPLING_RATE,
+            GEMINI_AUDIO_INPUT_SAMPLING_RATE,
+            discord.opus.CHANNELS
+        )
 
         if resampled_mono_pcm:
-            # logger.debug(f"[GeminiLiveSink] Sending {len(resampled_mono_pcm)} resampled bytes to Gemini Live from {user.display_name}")
             try:
-                # Send asynchronously without blocking the write method
                 asyncio.create_task(
                     self.gemini_session.send(
                         input={"data": resampled_mono_pcm, "mime_type": "audio/pcm"}
@@ -648,16 +633,16 @@ class GeminiLiveSink(AudioSink):
                 )
             except Exception as e:
                 logger.error(f"[GeminiLiveSink] Error sending audio to Gemini Live: {e}", exc_info=debug)
-                # Consider closing session or signaling error
                 asyncio.create_task(_cleanup_live_session(self.guild_id, f"Error sending audio: {e}"))
-        # else:
-            # logger.warning(f"[GeminiLiveSink] Resampled audio was empty for user {user.display_name}")
+
+    def wants_opus(self) -> bool:
+        return False
 
     def cleanup(self):
         logger.info(f"[GeminiLiveSink] Cleanup called for guild {self.guild_id}, user {self.user_id}.")
-        # Any specific cleanup for the sink itself
         if self.opus_decoder:
-            del self.opus_decoder # Explicitly delete if it holds resources
+            del self.opus_decoder
+
 
 
 class GeminiAudioStreamSource(discord.AudioSource):
