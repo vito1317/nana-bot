@@ -116,11 +116,13 @@ GEMINI_LIVE_CONFIG = types.GenerationConfig(
 # For "native-audio-dialog" models, the voice might be part of the model itself.
 # Let's assume a generic placeholder or that the model handles it.
 GEMINI_LIVE_CONNECT_CONFIG = types.LiveConnectConfig(
-    response_modalities=[types.ResponseModality.AUDIO], # Request audio response
+    response_modalities=[
+        "AUDIO"
+                         ], # Request audio response
+    media_resolution="MEDIA_RESOLUTION_MEDIUM",
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
-            # prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr") # Check availability
-            # Using a more common pattern or letting API pick if specific voice isn't critical/known
+            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Zephyr")
         )
     ),
     # context_window_compression=types.ContextWindowCompressionConfig( # Optional
