@@ -92,7 +92,7 @@ live_sessions: Dict[int, Dict[str, Any]] = {} # Stores active live session info 
 #    "text_channel": <discord.TextChannel>
 # }
 
-GEMINI_LIVE_MODEL_NAME = "models/gemini-1.5-flash-latest" # Or your preferred streaming model like "gemini-1.5-pro-latest" with "audio" tool.
+GEMINI_LIVE_MODEL_NAME = "models/gemini-2.5-flash-preview-native-audio-dialog" # Or your preferred streaming model like "gemini-1.5-pro-latest" with "audio" tool.
                                                          # For true native audio dialog: "models/gemini-X-Y-native-audio-dialog" if available
                                                          # The example used "gemini-2.5-flash-preview-native-audio-dialog" - check availability
 
