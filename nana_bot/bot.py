@@ -12,8 +12,8 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta, timezone
 import json
-#import google.generativeai as genai
-#from google.generativeai import types as types # Renamed to avoid conflict
+import google.generativeai as genai
+from google.generativeai import types as types # Renamed to avoid conflict
 from google import genai
 from google.genai import types
 import requests
