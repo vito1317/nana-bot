@@ -14,7 +14,7 @@ import json
 import google.generativeai as genai
 from google.generativeai import types as genai_types
 from google import genai as google_genai_module
-from google.genai import types as google_genai_types_module
+from google.genai import types as genai_types
 import requests
 from bs4 import BeautifulSoup
 import time
