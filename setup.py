@@ -22,7 +22,7 @@ setuptools.setup(
     python_requires='>=3.9',
     install_requires=[
         "pyparsing>=3.0.0",
-        "urllib3>=1.26.0,<2.0",
+        "urllib3>=1.26.0,<3.0",
         "discord.py",
         "google-auth>=2.14.1,<3.0.0,!=2.24.0,!=2.25.0",
         "rsa>=4.8,<5.0",
