@@ -133,6 +133,8 @@ def initialize_bot(config):
     
     genai.configure(api_key=API_KEY)
 
+    return config
+
 
 
 def init_db(db_name, tables):
