@@ -1,5 +1,6 @@
 import unittest
 from nana_bot import Config, initialize_bot, get_current_time_utc8, init_db_points
+import nana_bot
 import os
 
 class TestNanaBot(unittest.TestCase):
@@ -31,8 +32,8 @@ class TestNanaBot(unittest.TestCase):
 
     def test_initialize_bot(self):
         # 測試機器人初始化
+        # The bot initializes by setting global variables. We are testing those assignments here.
         initialize_bot(self.config)
-        import nana_bot
         
         self.assertEqual(nana_bot.API_KEY, "Test Gemini API Key")
         self.assertEqual(nana_bot.gemini_model, "gemini-2.0-flash-exp")
